@@ -22,6 +22,7 @@ function toast(msg, bad) {
   clearTimeout(toast.t); toast.t = setTimeout(() => t.className = "", 3500);
 }
 async function api(path, opts = {}) {
+  if (window.CC_DEMO) return window.CC_DEMO(path, opts); // автономная демо-версия: «сервер» работает в браузере
   const o = { method: opts.body !== undefined ? "POST" : "GET", headers: { ...(opts.headers || {}) }, credentials: "same-origin" };
   if (opts.body !== undefined) {
     if (opts.body instanceof Blob) o.body = opts.body;
@@ -97,7 +98,7 @@ function viewLogin() {
   $app.innerHTML = `<div class="login"><div class="box"><div class="logo"><i>${ICON.chip}</i><span><b>Compute</b><span>Collateral</span></span></div>
   <form class="card" id="lf"><h1>Вход</h1>
     <label class="f">Рабочая почта</label><input class="inp" name="email" type="email" value="e.sokolova@bank.ru" autocomplete="username" required>
-    <label class="f" style="margin-top:22px">Пароль</label><div class="pw"><input class="inp" name="password" type="password" autocomplete="current-password" required><button type="button" id="eye" title="Показать пароль">${ICON.eye}</button></div>
+    <label class="f" style="margin-top:22px">Пароль</label><div class="pw"><input class="inp" name="password" type="password" autocomplete="current-password" ${window.CC_DEMO ? 'value="Compute2026"' : ""} required><button type="button" id="eye" title="Показать пароль">${ICON.eye}</button></div>
     <div style="text-align:right;margin:14px 0 26px"><a href="#" id="forgot">Забыли пароль?</a></div>
     <button class="btn primary" style="width:100%;justify-content:center;height:58px;font-size:18px">Войти</button><div class="err" id="le"></div>
     <p class="muted" style="font-size:13px;margin:22px 0 0">Демо-доступ: e.sokolova@bank.ru / Compute2026</p></form></div></div>`;
@@ -167,7 +168,7 @@ function wizStep1(head) {
   ${p.errors.length ? `<div class="info bad"><b>Исправьте файл и загрузите заново</b><br>${p.errors.slice(0, 6).map(esc).join("<br>")}${p.errors.length > 6 ? `<br>…и ещё ${p.errors.length - 6}` : ""}</div>` : ""}${tbl}
   <div class="foot"><span></span><button class="btn primary" id="next" ${p.errors.length || !p.cards ? "disabled" : ""}>Далее</button></div>`
       : `<div class="drop" id="drop"><div class="ic">${ICON.up}</div><h2>Загрузите список оборудования</h2><p class="muted" style="font-size:18px;margin:0 0 28px">Файл Excel или CSV от заёмщика, можно перетащить сюда</p>
-  <button class="btn primary" id="pick" style="padding:18px 40px;font-size:18px">Загрузить файл</button><p class="muted" style="margin-top:28px">Нет файла у заёмщика? <a href="/api/template.csv">Скачать шаблон</a></p></div>`}
+  <button class="btn primary" id="pick" style="padding:18px 40px;font-size:18px">Загрузить файл</button><p class="muted" style="margin-top:28px">Нет файла у заёмщика? <a href="/api/template.csv">Скачать шаблон</a></p>${window.CC_DEMO ? '<p><button class="btn" id="sample">Загрузить пример файла</button></p>' : ""}</div>`}
   <input type="file" id="fi" accept=".xlsx,.xlsm,.csv" hidden>`);
   const keep = () => { w.borrower = $("#wb").value; w.location = $("#wl").value; };
   const send = async f => {
@@ -178,6 +179,7 @@ function wizStep1(head) {
   $("#wb").oninput = keep; $("#wl").oninput = keep;
   $("#fi").onchange = e => e.target.files[0] && send(e.target.files[0]);
   $("#pick") && ($("#pick").onclick = () => $("#fi").click());
+  $("#sample") && ($("#sample").onclick = () => send(new File([CC_DEMO_SAMPLES.template], "equipment_example.csv")));
   $("#repl") && ($("#repl").onclick = e => { e.preventDefault(); $("#fi").click(); });
   const d = $("#drop");
   if (d) { d.ondragover = e => { e.preventDefault(); d.classList.add("over"); }; d.ondragleave = () => d.classList.remove("over"); d.ondrop = e => { e.preventDefault(); d.classList.remove("over"); e.dataTransfer.files[0] && send(e.dataTransfer.files[0]); }; }
@@ -220,7 +222,9 @@ function wizStep2(head) {
     tp.innerHTML = `<div class="info"><b>Загрузите вывод nvidia-smi</b><br>Команда: <code>nvidia-smi --query-gpu=index,serial,name,temperature.gpu,utilization.gpu --format=csv &gt; smi.csv</code></div><button class="btn primary" id="pk">Выбрать файл</button>`;
     $("#pk").onclick = () => $("#fi").click();
     if (w.smi) show(w.smi);
-    $("#fi").onchange = async e => { const f = e.target.files[0]; if (!f) return; try { w.smi = await api(`/deals/${id}/telemetry-file`, { body: f, headers: { "X-Filename": f.name } }); show(w.smi); } catch (er) { toast(er.message, true); } };
+    const upl = async f => { try { w.smi = await api(`/deals/${id}/telemetry-file`, { body: f, headers: { "X-Filename": f.name } }); show(w.smi); } catch (er) { toast(er.message, true); } };
+    $("#fi").onchange = e => e.target.files[0] && upl(e.target.files[0]);
+    if (window.CC_DEMO) { const b = document.createElement("button"); b.className = "btn"; b.style.marginLeft = "12px"; b.textContent = "Загрузить пример снимка"; b.onclick = () => upl(new File([CC_DEMO_SAMPLES.smi()], "smi_example.csv")); $("#pk").after(b); }
   } else tp.innerHTML = `<div class="info warn"><b>Состояние карт неизвестно</b><br>К рыночной стоимости применяется поправка 7 %, наблюдать за залогом после выдачи кредита будет нельзя.</div>`;
 }
 function wizStep3(head) {

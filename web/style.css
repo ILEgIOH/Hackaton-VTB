@@ -184,3 +184,10 @@ input[type=range]{width:100%;accent-color:var(--navy)}
 #toast.show{opacity:1;transform:translate(-50%,0)}#toast.bad{background:var(--red)}
 .loading{padding:80px;text-align:center;color:var(--slate)}
 @media(max-width:1100px){.top{padding:0 20px;gap:14px}.hero,.stats,.summary{grid-template-columns:1fr 1fr}.chartpanel,.two,.nlist .item,.opts,.grid3{grid-template-columns:1fr}.gpus{grid-template-columns:repeat(4,1fr)}.mkrow{grid-template-columns:1fr}.search{width:100%}.chartpanel>div+div{border:0;border-top:1px solid var(--line)}}
+
+@media(max-width:700px){.top{padding:0 12px;gap:6px;overflow-x:auto;height:54px}.logo span{display:none}.nav a{padding:0 9px;font-size:14px}.user>span:last-of-type{display:none}.top .icon-btn:nth-of-type(2){display:none}
+main{padding:24px 16px 60px}h1{font-size:26px}.dealhead h1{font-size:28px}.head{flex-direction:column}.hero,.hero.three,.stats,.summary{grid-template-columns:1fr}.hero>div{border-left:0;border-top:1px solid #ffffff1c;padding:22px}.hero>div:first-child{border-top:0}.hero .v{font-size:34px}.hero .strip{padding:14px 22px}
+.chartpanel>div,.two>.card,.mk,.card.filecard{padding:20px}.nlist .item{padding:22px}.row-between{flex-direction:column;align-items:stretch;gap:12px}.tabs{gap:18px;overflow-x:auto}.steps{flex-wrap:wrap;gap:10px}.steps .ln{display:none}.step{font-size:16px}.step .c{width:38px;height:38px}.gpus{grid-template-columns:repeat(2,1fr)}.login .card{padding:28px}.drop{padding:36px 14px}.drop h2{font-size:22px}.tip{min-width:170px}}
+.chartpanel>div,.two>div,.two>.card,.grid2>div,.grid3>div,.stats>div,.summary>div,.hero>div,.nlist .item>div{min-width:0}
+.chartbox,.chartbox svg{max-width:100%}
+.tab,.tabs .end{white-space:nowrap;flex:none}
