@@ -711,7 +711,7 @@ class App:
         @r("POST", "/api/ai/test", perm="ai_settings")
         def ai_test(ctx):
             c = self.cfg()
-            if not (c["api_key"] or "localhost" in c["base_url"] or "127.0.0.1" in c["base_url"]):
+            if not (c["api_key"] or ai.is_stub(c) or "localhost" in c["base_url"] or "127.0.0.1" in c["base_url"]):
                 raise ApiError("Не указан API-ключ", 422)
             try:
                 reply = ai.chat(c, [dict(role="user", content="Ответь одним словом: работает")], timeout=30)

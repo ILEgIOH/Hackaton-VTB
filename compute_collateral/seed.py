@@ -115,8 +115,8 @@ def seed(store):
     db = dict(
         users=[dict(email=e, name=n, short=sh, initials=i, role=r, password=hash_password(DEMO_PASSWORD), notify={}) for e, n, sh, i, r in STAFF],
         deals=deals, notifications=[], documents={}, ai_reports={}, events=[], outbox=[], requests={}, market=market_state,
-        settings=dict(ai=dict(enabled=False, base_url="https://api.openai.com/v1", api_key="",
-                              model="gpt-4o-mini", interval_min=30),
+        settings=dict(ai=dict(enabled=True, base_url="stub://local", api_key="",
+                              model="stub-model", interval_min=30),
                       simulate=True, thresholds=dict(engine.TH)),
     )
     store.db = db

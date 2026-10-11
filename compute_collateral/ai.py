@@ -35,6 +35,8 @@ def ai_config(db_settings: dict) -> dict:
 
 def ai_ready(cfg: dict) -> bool:
     # локальные модели (Ollama, vLLM) могут работать без ключа
+    if is_stub(cfg):
+        return bool(cfg.get("enabled"))
     local = any(h in cfg["base_url"] for h in ("localhost", "127.0.0.1"))
     return bool(cfg.get("enabled")) and (bool(cfg["api_key"]) or local)
 
@@ -76,6 +78,26 @@ def _bearer(cfg: dict) -> str:
     return d["access_token"]
 
 
+def is_stub(cfg: dict) -> bool:
+    return cfg["base_url"].startswith("stub")
+
+
+def chat_stub(messages: list[dict]) -> str:
+    """Заглушка нейросети без сети и ключа: на анализ отвечает JSON по найденным правилам, на вопрос — шаблонным текстом."""
+    user = messages[-1]["content"]
+    marker = "найденные детерминированными правилами:\n"
+    if marker in user:
+        findings = json.loads(user.split(marker, 1)[1])
+        risk = "low"
+        for f in findings:
+            risk = {"critical": "high", "warning": "medium"}.get(f["severity"], "low") if risk != "high" else risk
+        return json.dumps(dict(
+            risk=risk, findings=findings,
+            summary="[Заглушка ИИ] " + (f"Выявлено замечаний: {len(findings)}." if findings else "Аномалий не обнаружено."),
+            recommendations=["Подключите реальную нейросеть в Настройках — сейчас включён режим-заглушка."]), ensure_ascii=False)
+    return "[Заглушка ИИ] Реальная нейросеть пока не подключена. Ваш вопрос: «" + user[-200:] + "»"
+
+
 def is_anthropic(cfg: dict) -> bool:
     """api.anthropic.com → нативный Claude API через официальный SDK, остальное — OpenAI-совместимый /chat/completions."""
     return "anthropic.com" in cfg["base_url"]
@@ -114,6 +136,8 @@ def chat_claude(cfg: dict, messages: list[dict], timeout: int = 60) -> str:
 
 
 def chat(cfg: dict, messages: list[dict], json_mode: bool = False, timeout: int = 60) -> str:
+    if is_stub(cfg):
+        return chat_stub(messages)
     if is_anthropic(cfg):
         return chat_claude(cfg, messages, timeout)
     body = dict(model=cfg["model"], messages=messages, temperature=0.2)
@@ -275,6 +299,8 @@ def ask(deal: dict, detail: dict, cfg: dict, question: str, now: float | None = 
 
 def list_models(cfg: dict) -> list[str]:
     """GET {base_url}/models — список моделей провайдера для выпадающего списка в настройках."""
+    if is_stub(cfg):
+        return ["stub-model"]
     if is_anthropic(cfg):
         anthropic, client = _claude_client(cfg, 20)
         try:

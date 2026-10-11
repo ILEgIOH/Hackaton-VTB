@@ -205,6 +205,14 @@ class AI(unittest.TestCase):
         self.assertEqual(kw["messages"], [dict(role="user", content="hi")])
         self.assertNotIn("temperature", kw)
 
+    def test_stub_provider(self):
+        d = make_deal()
+        d["servers"][0]["gpus"][0].update(temp=90)
+        rep = ai.analyze(d, engine.deal_detail(d, time.time()), dict(enabled=True, base_url="stub://local", api_key="", model="stub-model"))
+        self.assertEqual(rep["source"], "ai")
+        self.assertEqual(rep["risk"], "high")
+        self.assertIn("Заглушка", rep["summary"])
+
     def test_ai_failure_falls_back_to_rules(self):
         d = make_deal()
         rep = ai.analyze(d, engine.deal_detail(d, time.time()), dict(enabled=True, base_url="http://127.0.0.1:1/v1", api_key="k", model="m"))
