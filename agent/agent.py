@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Агент ComputeCollateral: раз в N секунд отправляет в банк состояние GPU сервера.
 
-    python agent.py --server http://bank-host:8765 --token <ТОКЕН> --name srv-01
+    python agent.py --server http://bank-host:8765 --key CC-7F2K-91QX --name srv-01
     python agent.py ... --mock          # без GPU: синтетические данные для проверки
 
 Использует только стандартную библиотеку. Данные: серийный номер, температура, загрузка, наработка.
@@ -42,9 +42,9 @@ def read_mock(state):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--server", required=True, help="адрес ComputeCollateral, например http://127.0.0.1:8765")
-    ap.add_argument("--token", required=True, help="токен агента из мастера «Новая оценка»")
+    ap.add_argument("--key", "--token", dest="key", required=True, help="ключ подключения из мастера «Новая оценка», вида CC-7F2K-91QX")
     ap.add_argument("--name", required=True, help="имя сервера из перечня оборудования (srv-01)")
-    ap.add_argument("--interval", type=int, default=60, help="период отправки, сек")
+    ap.add_argument("--interval", type=int, default=300, help="период отправки, сек (по ТЗ — раз в 5 минут)")
     ap.add_argument("--initial-hours", type=float, default=0, help="начальная наработка карт, ч")
     ap.add_argument("--once", action="store_true", help="отправить один раз и выйти")
     ap.add_argument("--mock", action="store_true", help="синтетические данные (без GPU)")
@@ -63,7 +63,7 @@ def main():
         counter.write_text(str(hours))
         for g in gpus:
             g["hours"] = round(hours)
-        body = json.dumps(dict(token=a.token, server=a.name, gpus=gpus)).encode()
+        body = json.dumps(dict(key=a.key, server=a.name, gpus=gpus)).encode()
         req = urllib.request.Request(a.server.rstrip("/") + "/api/agent/ingest", data=body, headers={"Content-Type": "application/json"})
         try:
             with urllib.request.urlopen(req, timeout=20) as r:

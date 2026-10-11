@@ -6,6 +6,7 @@ import json
 import os
 import secrets
 import threading
+import time
 from pathlib import Path
 
 DATA_DIR = Path(os.environ.get("CC_DATA_DIR", Path(__file__).resolve().parent.parent / "data"))
@@ -27,7 +28,9 @@ class Store:
         self.path = Path(path) if path else DATA_DIR / "db.json"
         self.lock = threading.RLock()
         self.db: dict = {}
-        self.sessions: dict[str, str] = {}
+        self.sessions: dict[str, dict] = {}
+        self.failures: dict[str, list] = {}      # почта -> [число ошибок, до какого времени вход закрыт]
+        self.session_ttl = float(os.environ.get("CC_SESSION_MIN", "30")) * 60
 
     def load(self) -> bool:
         if self.path.exists():
@@ -42,14 +45,19 @@ class Store:
             tmp.write_text(json.dumps(self.db, ensure_ascii=False, indent=1), "utf-8")
             tmp.replace(self.path)
 
-    # сессии живут в памяти — после перезапуска нужно войти заново
+    # сессии живут в памяти — после перезапуска нужно войти заново; 30 минут без действий — сессия завершена
     def new_session(self, email: str) -> str:
         tok = secrets.token_urlsafe(24)
-        self.sessions[tok] = email
+        self.sessions[tok] = dict(email=email, last=time.time())
         return tok
 
     def user_for(self, token: str | None):
-        email = self.sessions.get(token or "")
-        if not email:
-            return None
-        return next((u for u in self.db["users"] if u["email"] == email), None)
+        """-> (пользователь | None, сессия_истекла)"""
+        s = self.sessions.get(token or "")
+        if not s:
+            return None, False
+        if time.time() - s["last"] > self.session_ttl:
+            self.sessions.pop(token, None)
+            return None, True
+        s["last"] = time.time()
+        return next((u for u in self.db["users"] if u["email"] == s["email"]), None), False

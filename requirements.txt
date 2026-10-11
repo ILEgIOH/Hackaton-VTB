@@ -1,2 +1,4 @@
-openpyxl>=3.1        # чтение/запись Excel
+openpyxl>=3.1        # Excel: чтение перечня оборудования, шаблон, выгрузка перечня
+reportlab>=4.0       # PDF-заключение (шрифт DejaVu с кириллицей лежит в compute_collateral/fonts)
+python-docx>=1.1     # Word-заключение
 pywebview>=5.0       # необязательно: нативное окно вместо браузера

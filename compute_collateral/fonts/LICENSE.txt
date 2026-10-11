@@ -1,0 +1,2 @@
+DejaVu Sans (c) Bitstream, Inc.; DejaVu changes are in public domain. Распространяется свободно по лицензии Bitstream Vera / DejaVu
+(https://dejavu-fonts.github.io/License.html). Используется для PDF с кириллицей.

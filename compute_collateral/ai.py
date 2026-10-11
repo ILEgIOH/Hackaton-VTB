@@ -194,3 +194,18 @@ def ask(deal: dict, detail: dict, cfg: dict, question: str, now: float | None = 
                  "опираясь только на переданные данные.\nДанные сделки:\n" + json.dumps(snap, ensure_ascii=False)),
             dict(role="user", content=question)]
     return chat(cfg, msgs)
+
+
+def list_models(cfg: dict) -> list[str]:
+    """GET {base_url}/models — список моделей провайдера для выпадающего списка в настройках."""
+    headers = {"Authorization": f"Bearer {cfg['api_key']}"} if cfg["api_key"] else {}
+    req = urllib.request.Request(cfg["base_url"].rstrip("/") + "/models", headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            data = json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"HTTP {e.code}: {e.read().decode('utf-8', 'replace')[:200]}") from None
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"Нет связи с API: {e.reason}") from None
+    items = data.get("data") or data.get("models") or []
+    return sorted(str(m.get("id") or m.get("name")) for m in items if isinstance(m, dict))

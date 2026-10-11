@@ -25,9 +25,9 @@ def drift(deal: dict, rng: random.Random, now: float, dt: float):
 
 
 class Monitor(threading.Thread):
-    def __init__(self, store, tick: float = 15.0):
+    def __init__(self, store, tick: float = 15.0, app=None):
         super().__init__(daemon=True, name="cc-monitor")
-        self.store, self.tick, self.rng = store, tick, random.Random()
+        self.store, self.tick, self.rng, self.app = store, tick, random.Random(), app
         self.stop_event = threading.Event()
 
     def run(self):
@@ -44,6 +44,9 @@ class Monitor(threading.Thread):
             db = st.db
             cfg = ai.ai_config(db["settings"])
             changed = False
+            if self.app:
+                self.app.ensure_market_fresh()
+                self.app.finalize_calcs(now)
             for deal in db["deals"].values():
                 if deal.get("status") != "active":
                     continue

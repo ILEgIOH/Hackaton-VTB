@@ -2,17 +2,20 @@
 from __future__ import annotations
 
 from calendar import monthrange
+import time as _time
 from collections import Counter, defaultdict
 from datetime import date
 
 from .market import MODELS, LOW_DATA_DEALERS
 
 WEIGHTS = dict(cost=0.30, comparative=0.40, income=0.30)
+LOW_DATA_WEIGHTS = dict(cost=0.40, comparative=0.25, income=0.35)   # мало цен по модели (ТЗ, «Логика расчётов»)
 LIQUIDATION_DISCOUNT = 0.28
 NO_TELEMETRY_HAIRCUT = 0.07
-NEAR_THRESHOLD_FACTOR = 1.15
-OFFLINE_AFTER_SEC = 300
+LTV_CAP = 0.75
 SCENARIOS = ("opt", "base", "pess")
+# пороги задаёт управление рисков (экран «Настройки уведомлений»)
+TH = dict(covenant=1.25, near=1.40, offline_warn_h=1.0, offline_notify_h=24.0)
 
 
 # ---------- даты и график платежей ----------
@@ -62,30 +65,43 @@ def has_telemetry(g: dict) -> bool:
     return g.get("temp") is not None
 
 
-def server_wear(server: dict, mode: str) -> float:
-    if mode == "none":
-        return NO_TELEMETRY_HAIRCUT
-    ws = [gpu_wear(g) if has_telemetry(g) else NO_TELEMETRY_HAIRCUT for g in server["gpus"]]
+def server_wear(deal: dict, server: dict, now: float | None = None) -> float:
+    now = now or _time.time()
+    ws = [card_wear(deal, server, g, now) for g in server["gpus"]]
     return sum(ws) / len(ws) if ws else NO_TELEMETRY_HAIRCUT
 
 
-def deal_wear(deal: dict) -> float:
-    gpus = [g for s in deal["servers"] for g in s["gpus"]]
-    if not gpus:
+def silent_seconds(server: dict, now: float) -> float:
+    ls = server.get("last_seen")
+    return float("inf") if not ls else now - ls
+
+
+def is_silent(deal: dict, server: dict, now: float) -> bool:
+    """Агент молчит дольше порога «предупредить» — карты сервера оцениваются с поправкой 7 %."""
+    return deal.get("telemetry_mode") == "agent" and silent_seconds(server, now) > TH["offline_warn_h"] * 3600
+
+
+def card_wear(deal: dict, server: dict, g: dict, now: float) -> float:
+    if deal.get("telemetry_mode") in (None, "none") or not has_telemetry(g) or is_silent(deal, server, now):
         return NO_TELEMETRY_HAIRCUT
-    if deal.get("telemetry_mode") == "none":
-        return NO_TELEMETRY_HAIRCUT
-    ws = [gpu_wear(g) if has_telemetry(g) else NO_TELEMETRY_HAIRCUT for g in gpus]
-    return sum(ws) / len(ws)
+    return gpu_wear(g)
+
+
+def deal_wear(deal: dict, now: float | None = None) -> float:
+    now = now or _time.time()
+    ws = [card_wear(deal, s, g, now) for s in deal["servers"] for g in s["gpus"]]
+    return sum(ws) / len(ws) if ws else NO_TELEMETRY_HAIRCUT
 
 
 # ---------- оценка ----------
 
+RENT_DECAY, DISCOUNT, SERVICE_YEARS = 0.30, 0.22, 3
+
+
 def income_per_card(m: dict) -> float:
-    net = m["rent"] * 8760 * m["util"] * 0.55
-    rate = 0.20
-    pv = sum(net / (1 + rate) ** t for t in (1, 2, 3))
-    return pv + 0.45 * m["median"] / (1 + rate) ** 3
+    """Доход от аренды за оставшийся срок службы: ставка × 8760 × загрузка, ставки падают на 30 % в год, дисконт 22 %."""
+    year = m["rent"] * 8760 * m["util"]
+    return sum(year * (1 - RENT_DECAY) ** t / (1 + DISCOUNT) ** (t + 1) for t in range(SERVICE_YEARS))
 
 
 def card_counts(deal: dict) -> Counter:
@@ -96,9 +112,9 @@ def card_counts(deal: dict) -> Counter:
     return c
 
 
-def valuation(deal: dict) -> dict:
+def valuation(deal: dict, now: float | None = None) -> dict:
     counts = card_counts(deal)
-    wear = deal_wear(deal)
+    wear = deal_wear(deal, now)
     cost = comp = inc = 0.0
     per_model = {}
     low_data = []
@@ -110,11 +126,12 @@ def valuation(deal: dict) -> dict:
         ic = n * income_per_card(m)
         if low:
             low_data.append(model)
-        blended = WEIGHTS["cost"] * c + WEIGHTS["comparative"] * cp + WEIGHTS["income"] * ic
+        w = LOW_DATA_WEIGHTS if low else WEIGHTS
+        blended = w["cost"] * c + w["comparative"] * cp + w["income"] * ic
         per_model[model] = dict(cards=n, cost=c, comparative=cp, income=ic,
                                 weighted=blended, market=blended * (1 - wear))
         cost, comp, inc = cost + c, comp + cp, inc + ic
-    weighted = WEIGHTS["cost"] * cost + WEIGHTS["comparative"] * comp + WEIGHTS["income"] * inc
+    weighted = sum(pm["weighted"] for pm in per_model.values())
     market = weighted * (1 - wear)
     cards = sum(counts.values())
     return dict(
@@ -184,15 +201,19 @@ def pessimistic_gap(pts: list[dict]):
                 max_gap=mx, last_date=pts[last]["date"])
 
 
-def recommend_ltv(fc: dict, market: float, scen: str = "pess") -> dict:
-    """Максимальная сумма, при которой залог в выбранном сценарии не опускается ниже долга."""
+def recommend_ltv(fc: dict, market: float, scen: str = "pess", basis: str = "market") -> dict:
+    """Наибольшая сумма, при которой в выбранном сценарии долг каждый месяц не выше стоимости залога.
+    basis="liquidation": стоимость берётся ×0,72. LTV = сумма / текущая рыночная стоимость, не выше 75 %."""
+    key = scen + ("_liq" if basis == "liquidation" else "")
     pts = fc["points"]
-    covs = [p[scen] / p["debt"] for p in pts if p["debt"] > 1]
+    covs = [p[key] / p["debt"] for p in pts if p["debt"] > 1]
     min_cov = min(covs) if covs else 99.0
     max_loan = fc["amount"] * min_cov
-    rec_ltv = min(max_loan / market, 0.80) if market else 0
+    if market and max_loan > LTV_CAP * market:
+        max_loan = LTV_CAP * market
+    rec_ltv = max_loan / market if market else 0
     return dict(max_loan=max_loan, ltv=rec_ltv, requested_ltv=fc["amount"] / market if market else 0,
-                exceeds=fc["amount"] > max_loan + 1, min_pess_coverage=min_cov)
+                exceeds=fc["amount"] > max_loan + 1, min_pess_coverage=min_cov, headroom=max_loan - fc["amount"])
 
 
 def half_year_table(fc: dict) -> list[dict]:
@@ -220,9 +241,10 @@ def serial_mismatches(deal: dict) -> list[dict]:
     return out
 
 
-def is_online(server: dict, now: float) -> bool:
+def is_online(server: dict, now: float, warn_h: float | None = None) -> bool:
+    """На связи: данные приходили не позднее порога «сервер молчит, предупредить» (по ТЗ — 1 час)."""
     ls = server.get("last_seen")
-    return bool(ls) and now - ls < OFFLINE_AFTER_SEC
+    return bool(ls) and now - ls <= (warn_h if warn_h is not None else TH["offline_warn_h"]) * 3600
 
 
 def equipment_state(deal: dict, now: float) -> dict:
@@ -240,8 +262,15 @@ def equipment_state(deal: dict, now: float) -> dict:
         label, code = "Нет данных", "nodata"
     else:
         label, code = "На месте", "ok"
-    return dict(code=code, label=label, mismatches=mism, offline=offline,
+    silent = [dict(server=s["name"], cards=len(s["gpus"]), hours=silent_seconds(s, now) / 3600 if s.get("last_seen") else None,
+                   last_seen=s.get("last_seen")) for s in deal["servers"] if s["name"] in offline]
+    online_n = sum(1 for s in deal["servers"] if mode == "agent" and is_online(s, now))
+    return dict(code=code, label=label, mismatches=mism, offline=offline, silent=silent, online=online_n, servers=len(deal["servers"]),
                 total=total, matched=matched, seen=seen)
+
+
+def near_level(covenant: float) -> float:
+    return covenant * TH["near"] / TH["covenant"]
 
 
 def status_of(cov_now: float | None, covenant: float) -> str:
@@ -249,14 +278,14 @@ def status_of(cov_now: float | None, covenant: float) -> str:
         return "ok"
     if cov_now < covenant:
         return "breach"
-    if cov_now < covenant * NEAR_THRESHOLD_FACTOR:
+    if cov_now < near_level(covenant):
         return "near"
     return "ok"
 
 
 def deal_summary(deal: dict, now: float, today: date | None = None) -> dict:
     """Лёгкая сводка для портфеля."""
-    val = valuation(deal)
+    val = valuation(deal, now)
     fc = forecast(deal, today=today, val=val)
     p0 = fc["points"][0]
     cov_now = coverage(val["market"], p0["debt"])
@@ -277,20 +306,21 @@ def deal_summary(deal: dict, now: float, today: date | None = None) -> dict:
 
 
 def deal_detail(deal: dict, now: float, today: date | None = None) -> dict:
-    val = valuation(deal)
+    val = valuation(deal, now)
     fc = forecast(deal, today=today, val=val)
     pts = fc["points"]
     p0 = pts[0]
     cov_now = coverage(val["market"], p0["debt"])
     rec = recommend_ltv(fc, val["market"])
     gap = pessimistic_gap(pts)
+    gap12 = pessimistic_gap([p for p in pts if p["m"] <= 12])
     eq = equipment_state(deal, now)
     sc = {}
     for model in val["per_model"]:
         s = MODELS[model]["scen"]
         sc[model] = dict(pess1=s["pess1"], newgen_drop=s["newgen_drop"], newgen_month=s["newgen_month"])
     return dict(valuation=val, forecast=fc, coverage_now=cov_now, status=status_of(cov_now, fc["covenant"]),
-                recommendation=rec, gap=gap, equipment=eq, half_year=half_year_table(fc),
+                recommendation=rec, gap=gap, gap12=gap12, equipment=eq, half_year=half_year_table(fc),
                 scenario_notes=sc, debt_now=p0["debt"])
 
 
@@ -305,10 +335,11 @@ def servers_view(deal: dict, now: float) -> list[dict]:
             hours=round(sum(g.get("hours") or 0 for g in tele) / len(tele)) if tele else None,
             util=round(sum(g["util"] for g in tele) / len(tele)) if tele else None,
             temp=round(sum(g["temp"] for g in tele) / len(tele)) if tele else None,
-            wear=server_wear(s, mode) if mode else None,
+            wear=server_wear(deal, s, now) if mode else None,
             matched=sum(1 for g in gpus if g.get("actual_serial") == g["serial"]),
             seen=sum(1 for g in gpus if g.get("actual_serial")),
             online=is_online(s, now) if mode == "agent" else None,
+            silent_hours=(silent_seconds(s, now) / 3600 if s.get("last_seen") else None) if mode == "agent" else None,
             last_seen=s.get("last_seen"),
             gpus=[dict(idx=g["idx"], serial=g["serial"], actual=g.get("actual_serial"), temp=g.get("temp"),
                        util=g.get("util"), hours=g.get("hours"), match=g.get("actual_serial") == g["serial"]

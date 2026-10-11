@@ -9,7 +9,22 @@ from compute_collateral.server import create_server
 from compute_collateral.store import Store
 
 
+def load_dotenv(path=None):
+    """Читает .env рядом с run.py (CC_AI_API_KEY=..., CC_AI_BASE_URL=..., CC_AI_MODEL=..., CC_SMTP_*). Уже заданные переменные не трогает."""
+    import os
+    from pathlib import Path
+    p = Path(path) if path else Path(__file__).resolve().parent / ".env"
+    if not p.exists():
+        return
+    for line in p.read_text("utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, v = line.split("=", 1)
+            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+
+
 def main():
+    load_dotenv()
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8765)
@@ -27,9 +42,9 @@ def main():
     store.save()
 
     srv = create_server(store, a.host, a.port)
-    monitor.Monitor(store).start()
+    monitor.Monitor(store, app=srv.app).start()
     url = f"http://{a.host}:{a.port}/"
-    print(f"ComputeCollateral: {url}  (вход: e.sokolova@bank.ru / Compute2026)")
+    print(f"ComputeCollateral: {url}  (вход: e.sokolova@bank.ru / Compute2026; роли: a.kim@ / m.orlova@ / leasing@bank.ru)")
     if a.no_window:
         srv.serve_forever()
         return
