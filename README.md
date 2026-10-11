@@ -43,14 +43,16 @@ python -m unittest discover -s tests   # тесты (41)
 
 ## Подключение нейросети по API
 
-*Настройки → «Нейросеть: подключение по API»* (доступно аналитику и управлению рисков). Нужен сервис с эндпоинтом `/chat/completions`
-в формате OpenAI: OpenAI, OpenRouter, Groq, Anthropic (OpenAI-совместимый режим), локальные Ollama / vLLM / LM Studio.
+*Настройки → «Нейросеть: подключение по API»* (доступно аналитику и управлению рисков). Два режима:
+- **Claude (нативный API, рекомендуется)** — `base_url = https://api.anthropic.com`, модель по умолчанию `claude-opus-5-5`, ключ `ANTHROPIC_API_KEY`.
+  Работает через официальный SDK `anthropic` (`pip install -r requirements.txt`).
+- **OpenAI-совместимый** (`/chat/completions`): OpenAI, OpenRouter, Groq, локальные Ollama / vLLM / LM Studio.
 Кнопки: быстрые пресеты провайдеров, «Список моделей» (`GET /models`), «Проверить подключение».
 
 Ключ лучше не вводить в интерфейсе, а положить в файл `.env` (в `.gitignore`):
 
 ```bash
-cp .env.example .env     # и заполнить CC_AI_API_KEY, при необходимости CC_AI_BASE_URL / CC_AI_MODEL
+cp .env.example .env     # и заполнить ANTHROPIC_API_KEY (или CC_AI_API_KEY), при необходимости CC_AI_BASE_URL / CC_AI_MODEL
 ```
 
 Модель получает JSON-снимок сделки (температура, загрузка, наработка, совпадение серийных номеров, связь, покрытие) и возвращает

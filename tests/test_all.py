@@ -189,6 +189,22 @@ class AI(unittest.TestCase):
         self.assertIn("Наработка больше возраста", titles)
         self.assertEqual(rep["risk"], "high")
 
+    def test_claude_provider_uses_sdk(self):
+        from unittest import mock
+        import types
+        cfg = dict(enabled=True, base_url="https://api.anthropic.com", api_key="k", model="claude-opus-5-5")
+        self.assertTrue(ai.is_anthropic(cfg))
+        fake = types.SimpleNamespace(content=[types.SimpleNamespace(type="text", text="ok")], stop_reason="end_turn")
+        client = mock.Mock()
+        client.messages.create.return_value = fake
+        with mock.patch.object(ai, "_claude_client", return_value=(mock.Mock(), client)):
+            out = ai.chat(cfg, [dict(role="system", content="S"), dict(role="user", content="hi")])
+        self.assertEqual(out, "ok")
+        kw = client.messages.create.call_args.kwargs
+        self.assertEqual(kw["system"], "S")
+        self.assertEqual(kw["messages"], [dict(role="user", content="hi")])
+        self.assertNotIn("temperature", kw)
+
     def test_ai_failure_falls_back_to_rules(self):
         d = make_deal()
         rep = ai.analyze(d, engine.deal_detail(d, time.time()), dict(enabled=True, base_url="http://127.0.0.1:1/v1", api_key="k", model="m"))

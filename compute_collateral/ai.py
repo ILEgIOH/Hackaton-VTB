@@ -27,7 +27,8 @@ SYSTEM_PROMPT = """Ты — аналитик банка, который след
 def ai_config(db_settings: dict) -> dict:
     cfg = dict(db_settings.get("ai", {}))
     cfg["base_url"] = os.environ.get("CC_AI_BASE_URL", cfg.get("base_url") or "https://api.openai.com/v1")
-    cfg["api_key"] = os.environ.get("CC_AI_API_KEY", cfg.get("api_key") or "")
+    cfg["api_key"] = os.environ.get("CC_AI_API_KEY") or cfg.get("api_key") or (
+        os.environ.get("ANTHROPIC_API_KEY", "") if "anthropic.com" in cfg["base_url"] else "")
     cfg["model"] = os.environ.get("CC_AI_MODEL", cfg.get("model") or "gpt-4o-mini")
     return cfg
 
@@ -38,7 +39,46 @@ def ai_ready(cfg: dict) -> bool:
     return bool(cfg.get("enabled")) and (bool(cfg["api_key"]) or local)
 
 
+def is_anthropic(cfg: dict) -> bool:
+    """api.anthropic.com → нативный Claude API через официальный SDK, остальное — OpenAI-совместимый /chat/completions."""
+    return "anthropic.com" in cfg["base_url"]
+
+
+def _claude_client(cfg: dict, timeout: float):
+    try:
+        import anthropic
+    except ImportError:
+        raise RuntimeError("Не установлен пакет anthropic: pip install anthropic") from None
+    return anthropic, anthropic.Anthropic(api_key=cfg["api_key"], timeout=timeout, max_retries=2)
+
+
+def chat_claude(cfg: dict, messages: list[dict], timeout: int = 60) -> str:
+    anthropic, client = _claude_client(cfg, timeout)
+    system = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
+    msgs = [dict(role=m["role"], content=m["content"]) for m in messages if m["role"] != "system"]
+    kw = dict(model=cfg["model"] or "claude-opus-5-5", max_tokens=4096, messages=msgs)
+    if system:
+        kw["system"] = system
+    try:
+        resp = client.messages.create(**kw)
+    except anthropic.AuthenticationError:
+        raise RuntimeError("Claude API: неверный API-ключ") from None
+    except anthropic.NotFoundError:
+        raise RuntimeError(f"Claude API: модель «{kw['model']}» не найдена") from None
+    except anthropic.RateLimitError:
+        raise RuntimeError("Claude API: превышен лимит запросов, повторите позже") from None
+    except anthropic.APIConnectionError as e:
+        raise RuntimeError(f"Нет связи с Claude API: {e}") from None
+    except anthropic.APIStatusError as e:
+        raise RuntimeError(f"Claude API: HTTP {e.status_code}: {str(e.message)[:200]}") from None
+    if resp.stop_reason == "refusal":
+        raise RuntimeError("Claude отказался отвечать на этот запрос")
+    return "".join(b.text for b in resp.content if b.type == "text")
+
+
 def chat(cfg: dict, messages: list[dict], json_mode: bool = False, timeout: int = 60) -> str:
+    if is_anthropic(cfg):
+        return chat_claude(cfg, messages, timeout)
     body = dict(model=cfg["model"], messages=messages, temperature=0.2)
     if json_mode:
         body["response_format"] = {"type": "json_object"}
@@ -198,6 +238,14 @@ def ask(deal: dict, detail: dict, cfg: dict, question: str, now: float | None = 
 
 def list_models(cfg: dict) -> list[str]:
     """GET {base_url}/models — список моделей провайдера для выпадающего списка в настройках."""
+    if is_anthropic(cfg):
+        anthropic, client = _claude_client(cfg, 20)
+        try:
+            return sorted(m.id for m in client.models.list(limit=100))
+        except anthropic.AuthenticationError:
+            raise RuntimeError("Claude API: неверный API-ключ") from None
+        except anthropic.APIError as e:
+            raise RuntimeError(f"Claude API: {e}") from None
     headers = {"Authorization": f"Bearer {cfg['api_key']}"} if cfg["api_key"] else {}
     req = urllib.request.Request(cfg["base_url"].rstrip("/") + "/models", headers=headers)
     try:

@@ -87,7 +87,7 @@ function watchModal(n, decide) {
 
 /* ---------- U08: настройки ---------- */
 const PRESETS = [["OpenAI", "https://api.openai.com/v1", "gpt-4o-mini"], ["OpenRouter", "https://openrouter.ai/api/v1", "openai/gpt-4o-mini"], ["Groq", "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile"],
-  ["Anthropic (совм. режим)", "https://api.anthropic.com/v1", "claude-sonnet-5-5"], ["Ollama (локально)", "http://localhost:11434/v1", "llama3.1"]];
+  ["Claude (Anthropic)", "https://api.anthropic.com", "claude-opus-5-5"], ["Ollama (локально)", "http://localhost:11434/v1", "llama3.1"]];
 async function viewSettings() {
   const S = await api("/settings"), th = S.thresholds, ed = S.can_edit_thresholds, a = S.ai;
   render("notifications", `<div class="crumbs"><a href="#/notifications">Уведомления</a> / Настройки</div><h1 style="margin-bottom:6px">Настройки уведомлений</h1><div class="sub" style="margin-bottom:26px">Какие события и куда присылать вам</div>

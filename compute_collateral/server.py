@@ -186,7 +186,7 @@ class App:
             thresholds=dict(engine.TH), can_edit_thresholds=users.can(user, "edit_thresholds"),
             notify=[dict(kind=k, label=l, to=to, **users.notify_pref(user, k)) for k, l, to in users.NOTIFY_TYPES],
             ai=dict(enabled=bool(s["ai"].get("enabled")), base_url=c["base_url"], model=c["model"], interval_min=c.get("interval_min", 30),
-                    has_key=bool(c["api_key"]), key_from_env=bool(__import__("os").environ.get("CC_AI_API_KEY")), can_edit=users.can(user, "ai_settings")),
+                    has_key=bool(c["api_key"]), key_from_env=bool(__import__("os").environ.get("CC_AI_API_KEY") or __import__("os").environ.get("ANTHROPIC_API_KEY")), can_edit=users.can(user, "ai_settings")),
             simulate=s.get("simulate", True))
 
     # ----- routes -----
