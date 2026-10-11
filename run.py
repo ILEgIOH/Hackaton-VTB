@@ -55,7 +55,7 @@ def main():
         import webview  # pip install pywebview
         webview.create_window("ComputeCollateral", url, width=1360, height=900, min_size=(1000, 700))
         webview.start()
-    except ImportError:
+    except Exception:  # нет pywebview или оконного движка — открываем в браузере
         webbrowser.open(url)
         try:
             threading.Event().wait()
