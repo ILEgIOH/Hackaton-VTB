@@ -39,6 +39,43 @@ def ai_ready(cfg: dict) -> bool:
     return bool(cfg.get("enabled")) and (bool(cfg["api_key"]) or local)
 
 
+_GIGA_TOKEN: dict = {}
+
+
+def _ssl_ctx():
+    """GigaChat подписан российским УЦ: путь к его сертификату — CC_AI_CA_BUNDLE (или CC_AI_INSECURE=1 только для отладки)."""
+    import ssl
+    ca = os.environ.get("CC_AI_CA_BUNDLE")
+    if ca:
+        return ssl.create_default_context(cafile=ca)
+    if os.environ.get("CC_AI_INSECURE") == "1":
+        return ssl._create_unverified_context()
+    return None
+
+
+def _bearer(cfg: dict) -> str:
+    """Для GigaChat ключ авторизации обменивается на access-token (живёт 30 мин); для остальных — сам ключ."""
+    if "sberbank.ru" not in cfg["base_url"]:
+        return cfg["api_key"]
+    hit = _GIGA_TOKEN.get(cfg["api_key"])
+    if hit and hit[1] > time.time() + 60:
+        return hit[0]
+    import uuid
+    req = urllib.request.Request(
+        "https://ngw.devices.sberbank.ru:9443/api/v2/oauth", data=b"scope=" + os.environ.get("CC_GIGACHAT_SCOPE", "GIGACHAT_API_PERS").encode(),
+        headers={"Authorization": "Basic " + cfg["api_key"], "RqUID": str(uuid.uuid4()),
+                 "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=20, context=_ssl_ctx()) as r:
+            d = json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"GigaChat: ошибка авторизации HTTP {e.code}") from None
+    except (urllib.error.URLError, OSError) as e:
+        raise RuntimeError(f"GigaChat: нет связи/сертификат ({getattr(e, 'reason', e)}). Укажите CC_AI_CA_BUNDLE") from None
+    _GIGA_TOKEN[cfg["api_key"]] = (d["access_token"], d.get("expires_at", 0) / 1000 or time.time() + 1500)
+    return d["access_token"]
+
+
 def is_anthropic(cfg: dict) -> bool:
     """api.anthropic.com → нативный Claude API через официальный SDK, остальное — OpenAI-совместимый /chat/completions."""
     return "anthropic.com" in cfg["base_url"]
@@ -84,11 +121,11 @@ def chat(cfg: dict, messages: list[dict], json_mode: bool = False, timeout: int 
         body["response_format"] = {"type": "json_object"}
     headers = {"Content-Type": "application/json"}
     if cfg["api_key"]:
-        headers["Authorization"] = f"Bearer {cfg['api_key']}"
+        headers["Authorization"] = f"Bearer {_bearer(cfg)}"
     req = urllib.request.Request(cfg["base_url"].rstrip("/") + "/chat/completions",
                                  data=json.dumps(body).encode(), headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with urllib.request.urlopen(req, timeout=timeout, context=_ssl_ctx()) as r:
             data = json.loads(r.read())
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", "replace")[:300]
@@ -246,10 +283,10 @@ def list_models(cfg: dict) -> list[str]:
             raise RuntimeError("Claude API: неверный API-ключ") from None
         except anthropic.APIError as e:
             raise RuntimeError(f"Claude API: {e}") from None
-    headers = {"Authorization": f"Bearer {cfg['api_key']}"} if cfg["api_key"] else {}
+    headers = {"Authorization": f"Bearer {_bearer(cfg)}"} if cfg["api_key"] else {}
     req = urllib.request.Request(cfg["base_url"].rstrip("/") + "/models", headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=20) as r:
+        with urllib.request.urlopen(req, timeout=20, context=_ssl_ctx()) as r:
             data = json.loads(r.read())
     except urllib.error.HTTPError as e:
         raise RuntimeError(f"HTTP {e.code}: {e.read().decode('utf-8', 'replace')[:200]}") from None

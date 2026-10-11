@@ -46,6 +46,8 @@ python -m unittest discover -s tests   # тесты (41)
 *Настройки → «Нейросеть: подключение по API»* (доступно аналитику и управлению рисков). Два режима:
 - **Claude (нативный API, рекомендуется)** — `base_url = https://api.anthropic.com`, модель по умолчанию `claude-opus-5-5`, ключ `ANTHROPIC_API_KEY`.
   Работает через официальный SDK `anthropic` (`pip install -r requirements.txt`).
+- **Российские:** пресеты **YandexGPT** (OpenAI-совместимый эндпоинт Yandex Cloud, модель `gpt://<ID каталога>/yandexgpt/latest`) и
+  **GigaChat** (ключ обменивается на токен автоматически; нужен сертификат Минцифры — `CC_AI_CA_BUNDLE`). См. `.env.example`.
 - **OpenAI-совместимый** (`/chat/completions`): OpenAI, OpenRouter, Groq, локальные Ollama / vLLM / LM Studio.
 Кнопки: быстрые пресеты провайдеров, «Список моделей» (`GET /models`), «Проверить подключение».
 
