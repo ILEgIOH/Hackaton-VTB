@@ -1,0 +1,102 @@
+<!doctype html><html lang="ru"><meta charset="utf-8"><title>ComputeCollateral motion</title>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{--navy:#0b1f4b;--navy2:#142d68;--cream:#fff4e0;--teal:#4aa3b8;--amber:#f1b95b;--red:#e8484f;--green:#3aa76d}
+*{box-sizing:border-box;margin:0}
+html,body{width:1920px;height:1080px;overflow:hidden;background:var(--navy);font-family:Manrope,system-ui,sans-serif;color:#fff}
+.scene{position:absolute;inset:0;opacity:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+.cream{background:var(--cream);color:var(--navy)}
+.bg{position:absolute;inset:0;background:radial-gradient(900px 600px at 80% 10%,#1d4a9a55,transparent),radial-gradient(700px 500px at 10% 100%,#4aa3b833,transparent)}
+h1{font-size:104px;font-weight:800;line-height:1.08;letter-spacing:-2px}
+h2{font-size:78px;font-weight:800;line-height:1.12;letter-spacing:-1px}
+p.sub{font-size:38px;opacity:.8;margin-top:28px;font-weight:600}
+.hl{color:var(--amber)} .teal{color:var(--teal)} .redt{color:var(--red)}
+.a{opacity:0}.hold *{animation-play-state:paused!important}
+@keyframes rise{from{opacity:0;transform:translateY(60px)}to{opacity:1;transform:none}}
+@keyframes pop{0%{opacity:0;transform:scale(.4)}70%{transform:scale(1.08)}100%{opacity:1;transform:none}}
+@keyframes fin{to{opacity:1}} @keyframes fout{to{opacity:0}}
+@keyframes draw{from{opacity:1;stroke-dashoffset:var(--len)}to{opacity:1;stroke-dashoffset:0}}
+@keyframes slide{from{opacity:0;transform:translateX(-120px)}to{opacity:1;transform:none}}
+@keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-12px)}40%{transform:translateX(12px)}60%{transform:translateX(-8px)}80%{transform:translateX(8px)}}
+@keyframes flow{from{stroke-dashoffset:60}to{stroke-dashoffset:0}}
+.chips{display:flex;gap:28px;margin-top:56px}
+.chip{background:#ffffff14;border:2px solid #ffffff30;border-radius:22px;padding:22px 34px;font-size:34px;font-weight:600}
+.node{width:300px;height:210px;border-radius:30px;background:#ffffff12;border:2px solid #ffffff33;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:32px;font-weight:700;gap:14px}
+.node i{font-style:normal;font-size:76px}
+.row{display:flex;align-items:center;gap:0}
+.arrow{width:150px;height:6px;margin:0 6px;background:repeating-linear-gradient(90deg,var(--teal) 0 18px,transparent 18px 30px);animation:flow .8s linear infinite;background-size:60px 6px}
+.kpis{display:flex;gap:36px}
+.kpi{background:#fff;border-radius:30px;padding:36px 44px;min-width:420px;text-align:left;box-shadow:0 20px 60px #0b1f4b22}
+.kpi small{font-size:28px;opacity:.65;font-weight:600}
+.kpi b{display:block;font-size:92px;font-weight:800;margin-top:6px;letter-spacing:-2px}
+.alert{margin-top:44px;background:#fde6e7;border:3px solid var(--red);color:#8d1b22;border-radius:26px;padding:26px 44px;font-size:38px;font-weight:700;display:flex;gap:20px;align-items:center}
+.alert i{width:22px;height:22px;border-radius:50%;background:var(--red);display:block}
+.logo{display:flex;align-items:center;gap:26px;font-size:96px;font-weight:800;letter-spacing:-2px}
+.logo span{font-weight:400}
+.mark{width:120px;height:120px;border-radius:30px;background:var(--cream);display:grid;place-items:center;color:var(--navy);font-size:70px}
+</style>
+<body class="hold">
+<div class="bg"></div>
+
+<!-- 0–3: проблема -->
+<section class="scene" data-from="0" data-to="3.2">
+  <h1 class="a" data-at=".2" data-an="rise">GPU-серверы —<br><span class="hl">новый залог</span></h1>
+  <p class="sub a" data-at=".9" data-an="rise">Банки уже кредитуют под видеокарты</p>
+  <div class="chips">
+    <div class="chip a" data-at="1.5" data-an="pop">📉 Быстро дешевеют</div>
+    <div class="chip a" data-at="1.8" data-an="pop">🔁 Можно подменить</div>
+    <div class="chip a" data-at="2.1" data-an="pop">🌐 Лежат у заёмщика</div>
+  </div>
+</section>
+
+<!-- 3–6.5: цена падает -->
+<section class="scene" data-from="3.2" data-to="6.5">
+  <h2 class="a" data-at="3.2" data-an="rise">Залог дешевеет —<br><span class="redt">долг остаётся</span></h2>
+  <svg width="1100" height="320" viewBox="0 0 1100 320" style="margin-top:30px;overflow:visible">
+    <path d="M0 40 C250 60 500 150 1100 230" fill="none" stroke="#4aa3b8" stroke-width="10" stroke-linecap="round" stroke-dasharray="1300" style="--len:1300" class="a" data-at="3.6" data-an="draw" data-dur="1.8"/>
+    <path d="M0 150 H300 V190 H600 V230 H900 V270 H1100" fill="none" stroke="#fff" stroke-width="8" stroke-dasharray="1500" style="--len:1500" class="a" data-at="4.2" data-an="draw" data-dur="1.8"/>
+    <text x="1110" y="235" fill="#4aa3b8" font-size="30" font-weight="700" class="a" data-at="5.4" data-an="fin">залог</text>
+    <text x="1110" y="290" fill="#fff" font-size="30" font-weight="700" class="a" data-at="5.6" data-an="fin">долг</text>
+  </svg>
+  <p class="sub a" data-at="5.2" data-an="rise">Покрытие падает — а банк узнаёт об этом поздно</p>
+</section>
+
+<!-- 6.5–10: решение -->
+<section class="scene" data-from="6.6" data-to="10.2">
+  <div class="logo a" data-at="6.7" data-an="rise"><div class="mark">⛨</div><div><b>Compute</b><span>Collateral</span></div></div>
+  <p class="sub a" data-at="7.3" data-an="rise" style="margin-bottom:56px">Мониторинг залога в реальном времени</p>
+  <div class="row">
+    <div class="node a" data-at="7.7" data-an="pop"><i>🖥️</i>Серверы и GPU</div>
+    <div class="arrow a" data-at="8.1" data-an="fin"></div>
+    <div class="node a" data-at="8.3" data-an="pop"><i>📡</i>Телеметрия по API</div>
+    <div class="arrow a" data-at="8.6" data-an="fin"></div>
+    <div class="node a" data-at="8.8" data-an="pop"><i>🤖</i>Оценка + ИИ-наблюдатель</div>
+  </div>
+</section>
+
+<!-- 10–13: результат -->
+<section class="scene cream" data-from="10.3" data-to="13.2">
+  <h2 class="a" data-at="10.2" data-an="rise" style="margin-bottom:50px">Банк видит залог <span class="teal">каждую минуту</span></h2>
+  <div class="kpis">
+    <div class="kpi a" data-at="10.5" data-an="rise"><small>Стоимость залога</small><b><span data-count="94.0" data-dec="1" data-at="10.5">0</span> млн ₽</b></div>
+    <div class="kpi a" data-at="10.75" data-an="rise"><small>Покрытие долга</small><b><span data-count="1.45" data-dec="2" data-at="10.75">0</span></b></div>
+    <div class="kpi a" data-at="11" data-an="rise"><small>Рекомендуемый LTV</small><b><span data-count="52.4" data-dec="1" data-at="11">0</span> %</b></div>
+  </div>
+  <div class="alert a" data-at="11.9" data-an="rise"><i></i>Серийный номер GPU не совпадает с договором — подмена выявлена</div>
+</section>
+
+<!-- 13–15: финал -->
+<section class="scene" data-from="13" data-to="99">
+  <div class="logo a" data-at="13.2" data-an="pop"><div class="mark">⛨</div><div><b>Compute</b><span>Collateral</span></div></div>
+  <h2 class="a" data-at="13.8" data-an="rise" style="margin-top:44px;font-size:64px">GPU-залог <span class="hl">под контролем 24/7</span></h2>
+</section>
+
+<script>
+const E=(sel,f)=>document.querySelectorAll(sel).forEach(f);
+E('.scene',s=>{const f=+s.dataset.from,t=+s.dataset.to;s.style.animation=`fin .35s ease ${f}s both`+(t<90?`,fout .35s ease ${t-.35}s forwards`:'')});
+E('[data-an]',e=>{const d=e.dataset.dur||.7;e.style.animation=`${e.dataset.an} ${d}s cubic-bezier(.2,.8,.2,1) ${e.dataset.at}s both`});
+let t0=performance.now()+1e9;window.go=()=>{document.body.classList.remove('hold');t0=performance.now()};
+(function tick(){const t=(performance.now()-t0)/1000;
+E('[data-count]',e=>{const k=Math.min(1,Math.max(0,(t-e.dataset.at)/1.1)),v=+e.dataset.count*(1-Math.pow(1-k,3));e.textContent=v.toFixed(+e.dataset.dec).replace('.',',')});
+requestAnimationFrame(tick)})();
+</script></body></html>
