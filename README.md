@@ -57,6 +57,8 @@ python -m unittest discover -s tests   # тесты (41)
 
 **Вариант 2 — статичное демо в браузере (GitHub Pages).** Файл `docs/index.html` работает без сервера. Репозиторий → *Settings* → *Pages* → *Deploy from a branch* → ветка `main`, папка `/docs`. Ссылка: `https://ilegioh.github.io/Hackaton-VTB/`.
 
+**Вариант 3 — Netlify.** Статичное демо, как в варианте 2. Быстро: app.netlify.com → *Add new site* → *Deploy manually* → перетащить папку `docs` (или файл `index.html`). Через Git: *Import from Git* → репозиторий, ветка `main`, *Publish directory* `docs`, команда сборки пустая (настройка уже в `netlify.toml`). Серверную версию (Python) Netlify не запускает, для неё нужен Render.
+
 ## Подключение нейросети по API
 
 *Настройки → «Нейросеть: подключение по API»* (доступно аналитику и управлению рисков). Два режима:

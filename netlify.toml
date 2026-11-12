@@ -1,0 +1,3 @@
+# Netlify: статичное демо без сборки (то же, что docs/index.html для GitHub Pages)
+[build]
+  publish = "docs"
