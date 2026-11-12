@@ -26,12 +26,16 @@ def load_dotenv(path=None):
 def main():
     load_dotenv()
     ap = argparse.ArgumentParser()
-    ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--port", type=int, default=8765)
+    import os
+    cloud = bool(os.environ.get("PORT"))  # на хостингах (Render, Railway, Fly...) порт задаётся переменной PORT
+    ap.add_argument("--host", default="0.0.0.0" if cloud else "127.0.0.1")
+    ap.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8765)))
     ap.add_argument("--browser", action="store_true", help="открыть в браузере вместо окна приложения")
     ap.add_argument("--no-window", action="store_true", help="только сервер (без окна и браузера)")
     ap.add_argument("--reset", action="store_true", help="пересоздать демо-данные")
     a = ap.parse_args()
+    if cloud:
+        a.no_window = True
 
     store = Store()
     if a.reset or not store.load():
