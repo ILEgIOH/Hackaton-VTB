@@ -189,6 +189,12 @@ class App:
                     has_key=bool(c["api_key"]), key_from_env=bool(__import__("os").environ.get("CC_AI_API_KEY")), can_edit=users.can(user, "ai_settings")),
             simulate=s.get("simulate", True))
 
+    @staticmethod
+    def public_demo_guard():
+        """В публичном демо (CC_PUBLIC_DEMO=1) нельзя менять адрес/ключ нейросети: иначе сервер ходил бы по чужим адресам."""
+        if __import__("os").environ.get("CC_PUBLIC_DEMO"):
+            raise ApiError("В публичном демо подключение нейросети отключено (работает заглушка ИИ)", 403)
+
     # ----- routes -----
     def _register(self):
         r, st = self.route, self.store
@@ -690,6 +696,7 @@ class App:
 
         @r("POST", "/api/settings/ai", perm="ai_settings")
         def settings_ai(ctx):
+            self.public_demo_guard()
             b = ctx.json()
             a = self.db["settings"]["ai"]
             for k in ("base_url", "model"):
@@ -710,6 +717,7 @@ class App:
 
         @r("POST", "/api/ai/test", perm="ai_settings")
         def ai_test(ctx):
+            self.public_demo_guard()
             c = self.cfg()
             if not (c["api_key"] or ai.is_stub(c) or "localhost" in c["base_url"] or "127.0.0.1" in c["base_url"]):
                 raise ApiError("Не указан API-ключ", 422)
@@ -721,6 +729,7 @@ class App:
 
         @r("POST", "/api/ai/models", perm="ai_settings")
         def ai_models(ctx):
+            self.public_demo_guard()
             try:
                 return dict(models=ai.list_models(self.cfg()))
             except Exception as e:
