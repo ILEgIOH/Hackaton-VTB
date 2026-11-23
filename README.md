@@ -51,13 +51,13 @@ python -m unittest discover -s tests   # тесты (41)
 ## Деплой для жюри
 
 **Вариант 1 — полноценное приложение на сервере (Render, бесплатно).** Нужен только аккаунт на render.com:
-1. render.com → *New +* → *Blueprint* → выбрать репозиторий `ILEgIOH/Hackaton-VTB`. Конфигурация лежит в `render.yaml` (ветка `claude/server-monitoring-ai-app-b99x22`, Docker, бесплатный план).
+1. render.com → *New +* → *Blueprint* → выбрать репозиторий `ILEgIOH/Hackaton-VTB`. Конфигурация лежит в `render.yaml` (ветка `main`, Docker, бесплатный план).
 2. Через 3–5 минут появится ссылка вида `https://compute-collateral.onrender.com`. Вход: `e.sokolova@bank.ru` / `Compute2026` или кнопки ролей.
 3. В публичном режиме (`CC_PUBLIC_DEMO=1`) работает заглушка ИИ, а смена адреса и ключа нейросети отключена. Бесплатный план «засыпает» после 15 минут простоя (первое открытие ~1 минута), данные при перезапуске пересоздаются из демо-набора.
 
-**Вариант 2 — статичное демо в браузере (GitHub Pages).** Файл `docs/index.html` работает без сервера. Репозиторий → *Settings* → *Pages* → *Deploy from a branch* → ветка `claude/server-monitoring-ai-app-b99x22`, папка `/docs`. Ссылка: `https://ilegioh.github.io/Hackaton-VTB/`.
+**Вариант 2 — статичное демо в браузере (GitHub Pages).** Файл `docs/index.html` работает без сервера. Репозиторий → *Settings* → *Pages* → *Deploy from a branch* → ветка `main`, папка `/docs`. Ссылка: `https://ilegioh.github.io/Hackaton-VTB/`.
 
-**Вариант 3 — Netlify.** Статичное демо, как в варианте 2. Быстро: app.netlify.com → *Add new site* → *Deploy manually* → перетащить папку `docs` (или файл `index.html`). Через Git: *Import from Git* → репозиторий, ветка `claude/server-monitoring-ai-app-b99x22`, *Publish directory* `docs`, команда сборки пустая (настройка уже в `netlify.toml`). Серверную версию (Python) Netlify не запускает, для неё нужен Render.
+**Вариант 3 — Netlify.** Статичное демо, как в варианте 2. Быстро: app.netlify.com → *Add new site* → *Deploy manually* → перетащить папку `docs` (или файл `index.html`). Через Git: *Import from Git* → репозиторий, ветка `main`, *Publish directory* `docs`, команда сборки пустая (настройка уже в `netlify.toml`). Серверную версию (Python) Netlify не запускает, для неё нужен Render.
 
 ## Подключение нейросети по API
 

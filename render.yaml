@@ -4,7 +4,7 @@ services:
     name: compute-collateral
     runtime: docker
     plan: free
-    branch: claude/server-monitoring-ai-app-b99x22
+    branch: main
     healthCheckPath: /
     envVars:
       - key: CC_PUBLIC_DEMO
