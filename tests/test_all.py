@@ -364,6 +364,14 @@ class Api(unittest.TestCase):
         self.assertEqual(self.call("/search?q=" + urllib.parse.quote("Нейрокластер"))["items"][0]["type"], "company")
 
     def test_07_whatif_validation_and_terms_saved(self):
+        # эталонные 37,7 % из спецификации посчитаны на 11.10.2026; расчёт зависит от текущей даты, поэтому фиксируем её
+        from unittest import mock
+        import datetime
+        ts = datetime.datetime(2026, 10, 11, 12, 0).timestamp()
+        with mock.patch("time.time", return_value=ts):
+            self._test_07_body()
+
+    def _test_07_body(self):
         self.login()
         w = self.call("/deals/neurocluster/whatif", dict(amount=40e6, term=36, rate=18, scenario="pess"))
         self.assertFalse(w["recommendation"]["exceeds"])
