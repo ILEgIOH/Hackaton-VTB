@@ -54,9 +54,14 @@ def _ssl_ctx():
     return None
 
 
+def is_gigachat(cfg: dict) -> bool:
+    """Новый адрес api.giga.chat и прежний gigachat.devices.sberbank.ru: оба требуют OAuth-токен."""
+    return "giga.chat" in cfg["base_url"] or "sberbank.ru" in cfg["base_url"]
+
+
 def _bearer(cfg: dict) -> str:
     """Для GigaChat ключ авторизации обменивается на access-token (живёт 30 мин); для остальных — сам ключ."""
-    if "sberbank.ru" not in cfg["base_url"]:
+    if not is_gigachat(cfg):
         return cfg["api_key"]
     hit = _GIGA_TOKEN.get(cfg["api_key"])
     if hit and hit[1] > time.time() + 60:

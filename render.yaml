@@ -1,0 +1,11 @@
+# Render Blueprint: New + → Blueprint → выбрать репозиторий. Бесплатный план, без ключей.
+services:
+  - type: web
+    name: compute-collateral
+    runtime: docker
+    plan: free
+    branch: main
+    healthCheckPath: /
+    envVars:
+      - key: CC_PUBLIC_DEMO
+        value: "1"

@@ -1,0 +1,166 @@
+<!doctype html><html lang="ru"><meta charset="utf-8"><title>ComputeCollateral — cinematic</title>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;600;800&display=swap" rel="stylesheet">
+<style>
+*{margin:0;box-sizing:border-box}
+html,body{width:1920px;height:1080px;overflow:hidden;background:#02050f;font-family:Manrope,system-ui,sans-serif;color:#fff}
+canvas{position:absolute;inset:0}
+.ov{position:absolute;left:0;right:0;text-align:center;opacity:0;will-change:opacity}
+.big{font-size:88px;font-weight:800;letter-spacing:-2px;line-height:1.08;text-shadow:0 0 40px #4aa3b899,0 6px 30px #000c}
+.mid{font-size:50px;font-weight:600;letter-spacing:-.5px;text-shadow:0 0 24px #000d}
+.sm{font-size:30px;font-weight:600;letter-spacing:6px;text-transform:uppercase;color:#7fd3e4;text-shadow:0 0 20px #4aa3b8}
+.hl{color:#f1b95b}.rd{color:#ff5a63}.tl{color:#7fd3e4}
+.bar{position:absolute;left:0;right:0;height:96px;background:#000;z-index:5}
+.vig{position:absolute;inset:0;background:radial-gradient(ellipse at 50% 50%,transparent 55%,#000a 100%);z-index:4;pointer-events:none}
+.grain{position:absolute;inset:0;z-index:4;opacity:.07;mix-blend-mode:overlay;pointer-events:none}
+.alert{position:absolute;left:50%;top:640px;transform:translateX(-50%);display:flex;gap:22px;align-items:center;padding:26px 44px;border-radius:22px;background:#2a0b10dd;border:3px solid #ff5a63;box-shadow:0 0 60px #ff5a6388;font-size:36px;font-weight:800;color:#ffd9dc;opacity:0;backdrop-filter:blur(8px);white-space:nowrap}
+.alert i{width:22px;height:22px;border-radius:50%;background:#ff5a63;box-shadow:0 0 20px #ff5a63}
+.kpis{position:absolute;left:0;right:0;top:420px;display:flex;justify-content:center;gap:40px}
+.k{width:470px;padding:40px 46px;border-radius:30px;background:linear-gradient(160deg,#ffffff22,#ffffff0a);border:2px solid #ffffff38;backdrop-filter:blur(14px);box-shadow:0 30px 80px #0008, inset 0 0 40px #4aa3b822;opacity:0}
+.k small{font-size:26px;font-weight:600;color:#9bb4d8;letter-spacing:1px}
+.k b{display:block;font-size:98px;font-weight:800;letter-spacing:-3px;margin-top:6px;color:#fff;text-shadow:0 0 30px #4aa3b8aa}
+.k span{font-size:26px;color:#7fd3e4;font-weight:600}
+.logo{display:flex;align-items:center;justify-content:center;gap:28px;font-size:118px;font-weight:800;letter-spacing:-3px}
+.logo span{font-weight:300}
+.mark{width:140px;height:140px;border-radius:36px;background:#fff4e0;color:#0b1f4b;display:grid;place-items:center;font-size:88px;box-shadow:0 0 80px #4aa3b8aa}
+</style>
+<body>
+<canvas id="gl" width="1920" height="1080" style="visibility:hidden"></canvas><canvas id="c2" width="1920" height="1080"></canvas>
+<div class="vig"></div>
+<svg class="grain" width="1920" height="1080"><filter id="n"><feTurbulence id="tb" type="fractalNoise" baseFrequency=".9" numOctaves="2" seed="1"/></filter><rect width="100%" height="100%" filter="url(#n)"/></svg>
+<div class="bar" style="top:0"></div><div class="bar" style="bottom:0"></div>
+
+<div class="ov" id="t1" style="top:380px"><div class="sm" style="margin-bottom:26px">Новый класс залога</div><div class="big">Тысячи видеокарт.<br><span class="hl">Миллиарды рублей залога.</span></div></div>
+<div class="ov mid" id="t2" style="top:800px">А банк <span class="rd">не видит</span>, что с ними происходит</div>
+<div class="ov" id="t3" style="top:170px"><div class="big">Цена падает.<br><span class="rd">Долг остаётся.</span></div></div>
+<div class="ov" id="t4" style="top:150px"><div class="sm" style="margin-bottom:18px">ComputeCollateral</div><div class="big">Каждая карта <span class="tl">под контролем</span></div></div>
+<div class="alert" id="al"><i></i>Серийный номер GPU не совпадает с договором — подмена выявлена</div>
+<div class="ov" id="t5" style="top:125px"><div class="big">Оценка за секунды.<br><span class="tl">Сигнал — за миллисекунды.</span></div></div>
+<div class="kpis" id="kp">
+ <div class="k"><small>ОЦЕНКА ЗАЛОГА</small><b>4,6 с</b><span>вместо 5–15 дней</span></div>
+ <div class="k"><small>ПОКРЫТИЕ ДОЛГА</small><b data-c="1.45" data-d="2">1,45</b><span>ковенант не ниже 1,25</span></div>
+ <div class="k"><small>РЕКОМЕНДУЕМЫЙ LTV</small><b data-c="52.4" data-d="1">52,4 %</b><span>по пессимистичному сценарию</span></div>
+</div>
+<div class="ov" id="t6" style="top:330px"><div class="logo"><div class="mark">⛨</div><div><b>Compute</b><span>Collateral</span></div></div>
+ <div class="mid" style="margin-top:34px">Залог, который <span class="tl">видно</span></div>
+ <div class="sm" style="margin-top:70px;color:#9bb4d8;text-shadow:none">Хакатон ВТБ · команда «Вайб-банкинг»</div></div>
+
+<script type="importmap">{"imports":{"three":"/node_modules/three/build/three.module.js","three/addons/":"/node_modules/three/examples/jsm/"}}</script>
+<script type="module">
+import * as THREE from 'three';
+import {EffectComposer} from 'three/addons/postprocessing/EffectComposer.js';
+import {RenderPass} from 'three/addons/postprocessing/RenderPass.js';
+import {UnrealBloomPass} from 'three/addons/postprocessing/UnrealBloomPass.js';
+import {OutputPass} from 'three/addons/postprocessing/OutputPass.js';
+
+const W=1920,H=1080;const c2x=document.getElementById('c2').getContext('2d');
+const rnd=(s=>()=>{s|=0;s=s+0x6D2B79F5|0;let t=Math.imul(s^s>>>15,1|s);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296})(7);
+const R=new THREE.WebGLRenderer({canvas:document.getElementById('gl'),antialias:true,preserveDrawingBuffer:true});
+R.setSize(W,H,false);R.setPixelRatio(1);R.toneMapping=THREE.ACESFilmicToneMapping;R.toneMappingExposure=1.05;
+const S=new THREE.Scene();S.background=new THREE.Color(0x02050f);S.fog=new THREE.FogExp2(0x030816,0.022);
+const C=new THREE.PerspectiveCamera(42,W/H,.1,400);
+const comp=new EffectComposer(R);comp.setSize(W,H);comp.addPass(new RenderPass(S,C));
+const bloom=new UnrealBloomPass(new THREE.Vector2(W,H),0.8,0.6,0.2);comp.addPass(bloom);comp.addPass(new OutputPass());
+
+S.add(new THREE.HemisphereLight(0x2c5fb4,0x050a18,0.9));
+const key=new THREE.PointLight(0x5fc6e0,40,26,1.6);S.add(key);
+// --- aisle
+const NR=104,SP=1.3,Z0=14,X=3.3;
+const rackGeo=new THREE.BoxGeometry(1.15,2.7,1.0),rackMat=new THREE.MeshStandardMaterial({color:0x0e1c3c,metalness:.65,roughness:.38});
+const racks=new THREE.InstancedMesh(rackGeo,rackMat,NR*2);
+const ledGeo=new THREE.BoxGeometry(.04,.07,.55),ledMat=new THREE.MeshBasicMaterial({color:0xffffff});
+const LPR=7,leds=new THREE.InstancedMesh(ledGeo,ledMat,NR*2*LPR);
+const m4=new THREE.Matrix4(),col=new THREE.Color();
+const ledInfo=[];
+for(let side=0;side<2;side++)for(let i=0;i<NR;i++){
+  const x=side?X:-X,z=Z0-i*SP,idx=side*NR+i;
+  m4.makeTranslation(x,1.35,z);racks.setMatrixAt(idx,m4);
+  for(let l=0;l<LPR;l++){const y=.45+l*.33;m4.makeTranslation(x+(side?-.58:.58),y,z+(rnd()-.5)*.1);leds.setMatrixAt(idx*LPR+l,m4);
+    ledInfo.push({z,x,ph:rnd()*6.28,sp:.6+rnd()*2.2,pick:rnd()})}
+}
+S.add(racks);S.add(leds);
+// red rack
+const RED={side:0,i:Math.round((Z0+58)/SP)};const redIdx=RED.side*NR+RED.i,redZ=Z0-RED.i*SP;
+// floor
+const fc=document.createElement('canvas');fc.width=fc.height=512;{const g=fc.getContext('2d');g.fillStyle='#050c1e';g.fillRect(0,0,512,512);g.strokeStyle='#2f78a8';g.lineWidth=3;g.strokeRect(0,0,512,512);g.strokeStyle='#17406c';g.lineWidth=1;for(let k=1;k<4;k++){g.beginPath();g.moveTo(k*128,0);g.lineTo(k*128,512);g.moveTo(0,k*128);g.lineTo(512,k*128);g.stroke()}}
+const ft=new THREE.CanvasTexture(fc);ft.wrapS=ft.wrapT=THREE.RepeatWrapping;ft.repeat.set(10,160);ft.anisotropy=8;
+const floor=new THREE.Mesh(new THREE.PlaneGeometry(10,260),new THREE.MeshBasicMaterial({map:ft}));floor.rotation.x=-Math.PI/2;floor.position.set(0,0,-50);S.add(floor);
+// ceiling light strips
+for(const x of[-1.6,1.6]){const g=new THREE.Mesh(new THREE.BoxGeometry(.12,.05,250),new THREE.MeshBasicMaterial({color:0xaee9ff}));g.position.set(x,4.2,-50);S.add(g)}
+const ceil=new THREE.Mesh(new THREE.PlaneGeometry(10,260),new THREE.MeshBasicMaterial({color:0x04091a}));ceil.rotation.x=Math.PI/2;ceil.position.set(0,4.4,-50);S.add(ceil);
+// dust
+{const n=1600,p=new Float32Array(n*3);for(let i=0;i<n;i++){p[i*3]=(rnd()-.5)*40;p[i*3+1]=rnd()*30;p[i*3+2]=40-rnd()*190}
+ const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(p,3));
+ var dust=new THREE.Points(g,new THREE.PointsMaterial({color:0x9fe3ff,size:.07,transparent:true,opacity:.7,depthWrite:false,blending:THREE.AdditiveBlending}));S.add(dust)}
+// --- chart hologram
+const chart=new THREE.Group();chart.position.set(0,2.2,-40);S.add(chart);
+const segs=[];
+function line(points,color,r){const grp=[];for(let i=0;i<points.length-1;i++){const a=points[i],b=points[i+1],len=a.distanceTo(b);
+  const m=new THREE.Mesh(new THREE.CylinderGeometry(r,r,len,8),new THREE.MeshBasicMaterial({color}));
+  m.position.copy(a).add(b).multiplyScalar(.5);m.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),b.clone().sub(a).normalize());m.visible=false;chart.add(m);grp.push(m)}return grp}
+const N=48,collat=[],debt=[];
+for(let i=0;i<=N;i++){const u=i/N;collat.push(new THREE.Vector3(-3.6+7.2*u,1.4-2.7*Math.pow(u,.85)+Math.sin(u*9)*.05,0))}
+for(let i=0;i<=N;i++){const u=i/N;debt.push(new THREE.Vector3(-3.6+7.2*u,.55-.35*Math.floor(u*6)/6*1.0-0*u,0))}
+const dstep=[];for(let k=0;k<6;k++){const y=.55-.18*k,x0=-3.6+7.2*k/6,x1=-3.6+7.2*(k+1)/6;dstep.push(new THREE.Vector3(x0,y,0),new THREE.Vector3(x1,y,0));if(k<5)dstep.push(new THREE.Vector3(x1,y-.18,0))}
+const lc=line(collat,0x5fd6ee,.05),ld=line(dstep,0xffffff,.045);
+const zone=new THREE.Mesh(new THREE.PlaneGeometry(2.8,1.7),new THREE.MeshBasicMaterial({color:0xff3b46,transparent:true,opacity:0,depthWrite:false,blending:THREE.AdditiveBlending}));zone.position.set(2.2,-.5,-.02);chart.add(zone);
+const frame=new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.PlaneGeometry(8.2,4.4)),new THREE.LineBasicMaterial({color:0x3a8fbf,transparent:true,opacity:.6}));frame.position.y=-.3;chart.add(frame);
+// --- red ring
+const ring=new THREE.Mesh(new THREE.RingGeometry(.9,1.0,64),new THREE.MeshBasicMaterial({color:0xff3b46,transparent:true,opacity:0,side:THREE.DoubleSide,blending:THREE.AdditiveBlending,depthWrite:false}));ring.rotation.x=-Math.PI/2;ring.position.set(-X+1.3,.03,redZ);S.add(ring);
+const redL=new THREE.PointLight(0xff2a3a,0,16,1.6);redL.position.set(-X+1.4,1.6,redZ);S.add(redL);
+// scan plane
+const scan=new THREE.Mesh(new THREE.PlaneGeometry(8,4.5),new THREE.MeshBasicMaterial({color:0x7fe6ff,transparent:true,opacity:0,side:THREE.DoubleSide,blending:THREE.AdditiveBlending,depthWrite:false}));scan.position.set(0,2.2,0);S.add(scan);
+
+// --- camera keys (every 3 s)
+const keys=[[0,0,34,22,0,0,-20],[3,0,14,10,0,1.5,-30],[6,0,3.2,6,0,1.8,-30],[9,0,2.0,-8,0,1.6,-40],[12,0,1.9,-22,0,2.0,-50],[15,0,1.8,-33,0,2.0,-62],
+[18,-.6,1.9,-47,-3.3,1.6,-58],[21,.9,2.3,-52,-3.3,1.6,-58],[24,4,6,-40,0,1.5,-70],[27,0,14,-30,0,0,-90],[30,0,30,-10,0,0,-100],[33,0,34,-5,0,0,-100]];
+const P=new THREE.CatmullRomCurve3(keys.map(k=>new THREE.Vector3(k[1],k[2],k[3])),false,'centripetal');
+const T=new THREE.CatmullRomCurve3(keys.map(k=>new THREE.Vector3(k[4],k[5],k[6])),false,'centripetal');
+const cl=(a,b,x)=>Math.min(b,Math.max(a,x)),ss=(a,b,x)=>{x=cl(0,1,(x-a)/(b-a));return x*x*(3-2*x)};
+const fade=(id,a,b,c,d)=>{const e=document.getElementById(id);const o=ss(a,b,cur)*(1-ss(c,d,cur));e.style.opacity=o;e.style.transform=`translateY(${(1-ss(a,b,cur))*30}px)`};
+let cur=0;
+const bs=[...document.querySelectorAll('[data-c]')];
+window.seek=t=>{cur=t;const u=cl(0,1,t/33);
+ C.position.copy(P.getPoint(u));const tg=T.getPoint(u);
+ // лёгкая ручная тряска камеры
+ C.position.x+=Math.sin(t*1.7)*.03;C.position.y+=Math.cos(t*1.3)*.02;C.lookAt(tg);C.fov=42+ss(26,30,t)*6;C.updateProjectionMatrix();
+ key.position.copy(C.position).add(new THREE.Vector3(0,.6,-1.5));
+ // LED
+ const front=-33-(t-15.2)*30;const scanOn=t>15.2;
+ for(let k=0;k<ledInfo.length;k++){const L=ledInfo[k];let r,g,b;
+   const blink=.35+.65*Math.max(0,Math.sin(t*L.sp+L.ph));
+   if(L.pick<.35){r=.1;g=.9;b=.45}else if(L.pick<.8){r=.12;g=.35;b=1}else{r=.9;g=.7;b=.2}
+   let kk=blink*.55;
+   if(scanOn&&L.z>front){r=.25;g=.95;b=1;kk=.5+.12*Math.sin(t*3+L.ph)}
+   if(scanOn&&Math.abs(L.z-front)<1.6){r=b=g=1;kk=1.2}
+   col.setRGB(r*kk,g*kk,b*kk);leds.setColorAt(k,col)}
+ // красная стойка
+ if(t>16.3){const pulse=.6+.4*Math.sin((t-16.3)*9);for(let l=0;l<LPR;l++){col.setRGB(1.8*pulse,.1,.12*pulse);leds.setColorAt(redIdx*LPR+l,col)}}
+ leds.instanceColor.needsUpdate=true;
+ // chart
+ const cp=ss(10,14,t),show=ss(9.6,10.4,t)*(1-ss(15,15.8,t));chart.visible=show>0.01;frame.material.opacity=.6*show;
+ lc.forEach((m,i)=>m.visible=i/lc.length<cp);ld.forEach((m,i)=>m.visible=i/ld.length<ss(10.6,13,t));
+ chart.children.forEach(c=>{if(c.material&&c!==zone&&c!==frame)c.material.opacity=1});
+ chart.scale.setScalar(1+0*show);
+ zone.material.opacity=.32*ss(13,14,t)*(.8+.2*Math.sin(t*6))*show;
+ chart.rotation.y=Math.sin(t*.6)*.08;chart.position.y=2.2+Math.sin(t*1.1)*.05;
+ chart.traverse(o=>{if(o.isMesh&&o!==zone)o.material.transparent=true,o.material.opacity=show});
+ // scan plane
+ scan.visible=scanOn&&t<19.5;scan.position.z=front;scan.material.opacity=.22*(1-ss(18,19.5,t));
+ // ring
+ const rt=t-16.3;ring.material.opacity=rt>0?Math.max(0,.9-(rt%1.4)/1.4)*(1-ss(21,23,t)):0;const rs=1+((rt%1.4+1.4)%1.4)*2.2;ring.scale.set(rs,rs,rs);
+ redL.intensity=rt>0?(30+18*Math.sin(rt*9))*(1-ss(21,23,t)*.8):0;
+ dust.rotation.y=t*.01;dust.material.opacity=.7;
+ bloom.strength=.8-ss(16,17,t)*.25*(1-ss(21,23,t))+ss(26.5,28,t)*.3;
+ comp.render();c2x.drawImage(R.domElement,0,0);
+ // DOM
+ fade('t1',.4,1.4,3.6,4.6);fade('t2',5,6,8.6,9.6);fade('t3',10.2,11.2,14,15);fade('t4',15.6,16.6,20.2,21);
+ const al=document.getElementById('al');al.style.opacity=ss(17.2,17.6,t)*(1-ss(21,21.8,t));al.style.transform=`translateX(-50%) scale(${.9+.1*ss(17.2,17.8,t)})`;
+ fade('t5',21.4,22.4,25,26);
+ const kp=document.querySelectorAll('.k');kp.forEach((e,i)=>{const o=ss(22.4+i*.35,23.2+i*.35,t)*(1-ss(25.6,26.4,t));e.style.opacity=o;e.style.transform=`translateY(${(1-ss(22.4+i*.35,23.2+i*.35,t))*60}px)`});
+ bs.forEach(e=>{const k=ss(22.8,24.3,t),v=+e.dataset.c*k;e.textContent=v.toFixed(+e.dataset.d).replace('.',',')+(e.dataset.d==='1'?' %':'')});
+ fade('t6',27.2,28.4,99,100);
+ document.getElementById('tb').setAttribute('seed',Math.floor(t*24)%50);
+ document.body.dataset.ready=Math.round(t*1000);
+};
+window.seek(0);document.body.dataset.ok='1';
+</script></body></html>
