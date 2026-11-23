@@ -194,6 +194,35 @@ class AI(unittest.TestCase):
             self.assertTrue(ai.is_gigachat(dict(base_url=u)))
         self.assertFalse(ai.is_gigachat(dict(base_url="https://api.openai.com/v1")))
 
+    def test_gigachat_autopicks_model_on_404(self):
+        from unittest import mock
+        import io
+        import urllib.error
+        cfg = dict(enabled=True, base_url="https://api.giga.chat/v1", api_key="k", model="Wrong-Name")
+        ai._MODEL_FIX.clear()
+
+        class Resp:
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def read(self): return b'{"choices":[{"message":{"content":"ok"}}]}'
+
+        calls = []
+
+        def fake_open(req, timeout=None, context=None):
+            body = json.loads(req.data.decode())
+            calls.append(body["model"])
+            if body["model"] == "Wrong-Name":
+                raise urllib.error.HTTPError(req.full_url, 404, "nf", {}, io.BytesIO(b'{"message":"No such model"}'))
+            return Resp()
+        with mock.patch.object(ai.urllib.request, "urlopen", fake_open), \
+                mock.patch.object(ai, "_bearer", return_value="t"), \
+                mock.patch.object(ai, "list_models", return_value=["GigaChat-2-Max", "GigaChat-2", "GigaChat-Embeddings"]):
+            out = ai.chat(cfg, [dict(role="user", content="hi")])
+        self.assertEqual(out, "ok")
+        self.assertEqual(calls, ["Wrong-Name", "GigaChat-2"])
+        self.assertEqual(ai.effective_model(cfg), "GigaChat-2")
+        ai._MODEL_FIX.clear()
+
     def test_stub_provider(self):
         d = make_deal()
         d["servers"][0]["gpus"][0].update(temp=90)

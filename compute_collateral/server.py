@@ -725,7 +725,7 @@ class App:
                 reply = ai.chat(c, [dict(role="user", content="Ответь одним словом: работает")], timeout=30)
             except Exception as e:
                 raise ApiError(str(e), 502)
-            return dict(ok=True, reply=reply[:200], model=c["model"])
+            return dict(ok=True, reply=reply[:200], model=ai.effective_model(c))
 
         @r("POST", "/api/ai/models", perm="ai_settings")
         def ai_models(ctx):
