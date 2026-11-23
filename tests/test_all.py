@@ -189,6 +189,11 @@ class AI(unittest.TestCase):
         self.assertIn("Наработка больше возраста", titles)
         self.assertEqual(rep["risk"], "high")
 
+    def test_gigachat_detected_by_both_hosts(self):
+        for u in ("https://api.giga.chat/v1", "https://gigachat.devices.sberbank.ru/api/v1"):
+            self.assertTrue(ai.is_gigachat(dict(base_url=u)))
+        self.assertFalse(ai.is_gigachat(dict(base_url="https://api.openai.com/v1")))
+
     def test_stub_provider(self):
         d = make_deal()
         d["servers"][0]["gpus"][0].update(temp=90)
