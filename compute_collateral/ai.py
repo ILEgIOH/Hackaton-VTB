@@ -102,9 +102,29 @@ def chat_stub(messages: list[dict]) -> str:
     return "[Заглушка ИИ] Реальная нейросеть пока не подключена. Ваш вопрос: «" + user[-200:] + "»"
 
 
+_MODEL_FIX: dict = {}
+
+
+def effective_model(cfg: dict) -> str:
+    """Модель, с которой реально идут запросы (после автоподбора, если указанной у провайдера нет)."""
+    return _MODEL_FIX.get((cfg["base_url"], cfg["model"]), cfg["model"])
+
+
+def _pick_model(cfg: dict, models: list[str]) -> str | None:
+    """Автоподбор только для GigaChat: ищем чат-модель по имени. У других провайдеров подбирать вслепую нельзя."""
+    if not is_gigachat(cfg):
+        return None
+    chat_models = [m for m in models if m.lower().startswith("gigachat") and "embed" not in m.lower()]
+    for want in ("GigaChat-2-Max", "GigaChat-2", "GigaChat"):
+        if want in chat_models:
+            return want
+    return sorted(chat_models)[0] if chat_models else None
+
+
 def chat(cfg: dict, messages: list[dict], json_mode: bool = False, timeout: int = 60) -> str:
     if is_stub(cfg):
         return chat_stub(messages)
+    cfg = dict(cfg, model=effective_model(cfg))
     body = dict(model=cfg["model"], messages=messages, temperature=0.2)
     if json_mode:
         body["response_format"] = {"type": "json_object"}
@@ -120,6 +140,18 @@ def chat(cfg: dict, messages: list[dict], json_mode: bool = False, timeout: int 
         detail = e.read().decode("utf-8", "replace")[:300]
         if json_mode and e.code == 400:  # не все серверы знают response_format
             return chat(cfg, messages, json_mode=False, timeout=timeout)
+        if e.code == 404 and "model" in detail.lower():
+            try:
+                models = list_models(cfg)
+            except Exception:
+                models = []
+            pick = _pick_model(cfg, models)
+            if pick and pick != cfg["model"]:
+                _MODEL_FIX[(cfg["base_url"], cfg["model"])] = pick
+                return chat(cfg, messages, json_mode=json_mode, timeout=timeout)
+            hint = (" Доступные модели: " + ", ".join(models) + ". Впишите одну в CC_AI_MODEL (файл .env) и перезапустите.") if models else \
+                " Нажмите «Список моделей» и впишите доступное название в CC_AI_MODEL (файл .env)."
+            raise RuntimeError(f"Модель «{cfg['model']}» недоступна у провайдера.{hint}") from None
         raise RuntimeError(f"HTTP {e.code}: {detail}") from None
     except urllib.error.URLError as e:
         raise RuntimeError(f"Нет связи с API: {e.reason}") from None
