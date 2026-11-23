@@ -216,11 +216,11 @@ class AI(unittest.TestCase):
             return Resp()
         with mock.patch.object(ai.urllib.request, "urlopen", fake_open), \
                 mock.patch.object(ai, "_bearer", return_value="t"), \
-                mock.patch.object(ai, "list_models", return_value=["GigaChat-2-Max", "GigaChat-2", "GigaChat-Embeddings"]):
+                mock.patch.object(ai, "list_models", return_value=["GigaChat-2-Pro", "GigaChat-2-Max", "GigaChat-Embeddings"]):
             out = ai.chat(cfg, [dict(role="user", content="hi")])
         self.assertEqual(out, "ok")
-        self.assertEqual(calls, ["Wrong-Name", "GigaChat-2"])
-        self.assertEqual(ai.effective_model(cfg), "GigaChat-2")
+        self.assertEqual(calls, ["Wrong-Name", "GigaChat-2-Max"])
+        self.assertEqual(ai.effective_model(cfg), "GigaChat-2-Max")
         ai._MODEL_FIX.clear()
 
     def test_stub_provider(self):

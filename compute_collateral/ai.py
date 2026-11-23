@@ -115,7 +115,7 @@ def _pick_model(cfg: dict, models: list[str]) -> str | None:
     if not is_gigachat(cfg):
         return None
     chat_models = [m for m in models if m.lower().startswith("gigachat") and "embed" not in m.lower()]
-    for want in ("GigaChat-2", "GigaChat"):
+    for want in ("GigaChat-2-Max", "GigaChat-2", "GigaChat"):
         if want in chat_models:
             return want
     return sorted(chat_models)[0] if chat_models else None
