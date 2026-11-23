@@ -1,0 +1,11 @@
+# Render Blueprint: New + → Blueprint → выбрать репозиторий. Бесплатный план, без ключей.
+services:
+  - type: web
+    name: compute-collateral
+    runtime: docker
+    plan: free
+    branch: claude/server-monitoring-ai-app-b99x22
+    healthCheckPath: /
+    envVars:
+      - key: CC_PUBLIC_DEMO
+        value: "1"
