@@ -123,7 +123,9 @@ function serversView(deal, now) {
 }
 
 /* ---------- состояние и демо-данные ---------- */
-const DB = { users: USERS, deals: {}, notifications: [], documents: {}, ai_reports: {}, outbox: [], requests: {}, blobs: {}, settings: { ai: { enabled: false, base_url: "https://api.openai.com/v1", model: "gpt-4o-mini", interval_min: 30, api_key: "" }, simulate: true } };
+const REC = window.CC_REC || null;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const DB = { inc: {}, users: USERS, deals: {}, notifications: [], documents: {}, ai_reports: {}, outbox: [], requests: {}, blobs: {}, settings: { ai: { enabled: false, base_url: "https://api.openai.com/v1", model: "gpt-4o-mini", interval_min: 30, api_key: "" }, simulate: true } };
 let ME = null; const FAILS = {};
 function innMake(b9) { const d = [...b9].map(Number); return b9 + String(d.reduce((a, x, i) => a + x * [2, 4, 10, 3, 5, 9, 4, 6, 8][i], 0) % 11 % 10); }
 function innOk(inn) { if (!/^(\d{10}|\d{12})$/.test(inn)) return false; const d = [...inn].map(Number), chk = ws => ws.reduce((a, w, i) => a + w * d[i], 0) % 11 % 10; if (inn.length === 10) return chk([2, 4, 10, 3, 5, 9, 4, 6, 8]) === d[9]; return chk([7, 2, 4, 10, 3, 5, 9, 4, 6, 8]) === d[10] && chk([3, 7, 2, 4, 10, 3, 5, 9, 4, 6, 8]) === d[11]; }
@@ -294,7 +296,7 @@ function finalizeCalcs(now) {
 function dealPayload(deal) {
   const now = nowS(), detail = dealDetail(deal, now), models = {}; Object.keys(detail.valuation.per_model).forEach(k => models[k] = MODELS[k].scen); const asm = deal.assessments || [];
   return { id: deal.id, borrower: deal.borrower, inn: deal.inn, location: deal.location, contract: deal.contract, application: deal.application, contact: deal.contact, contact_email: deal.contact_email, status: deal.status, loan: deal.loan, telemetry_mode: deal.telemetry_mode, agent_token: deal.agent_token, agent_key: deal.agent_key, detail, servers: serversView(deal, now),
-    alerts: DB.notifications.filter(n => n.deal_id === deal.id && OPEN.includes(n.status)).length, models, thresholds: TH, ai_report: DB.ai_reports[deal.id] || null, ai_ready: false, assessed_at: asm.length ? asm[asm.length - 1].ts : null, last_assessment: asm.length ? asm[asm.length - 1] : null, tranches_suspended: !!deal.tranches_suspended, market_updated: MARKET.updated };
+    alerts: DB.notifications.filter(n => n.deal_id === deal.id && OPEN.includes(n.status)).length, models, thresholds: TH, ai_report: DB.ai_reports[deal.id] || null, ai_ready: !!REC, ai_recorded: REC ? { model: REC.model, ts: REC.recorded_at, questions: REC.questions } : null, assessed_at: asm.length ? asm[asm.length - 1].ts : null, last_assessment: asm.length ? asm[asm.length - 1] : null, tranches_suspended: !!deal.tranches_suspended, market_updated: MARKET.updated };
 }
 const LIMITS = { amount: [1e6, 5e8, "Введите сумму от 1 до 500 млн ₽"], term: [6, 60, "Срок от 6 до 60 месяцев"], rate: [1, 40, "Ставка от 1 до 40 % годовых"], covenant: [1, 2, "Ковенант от 1,00 до 2,00"] };
 function validateLoan(b, needDate, covDefault) {
@@ -397,13 +399,20 @@ R("POST", "/settings/thresholds", "edit_thresholds", async b => { const cov = pa
 R("POST", "/settings/ai", "ai_settings", async b => { const a = DB.settings.ai; ["base_url", "model"].forEach(k => { if (typeof b[k] === "string" && b[k].trim()) a[k] = b[k].trim(); }); if ("enabled" in b) a.enabled = !!b.enabled; if (typeof b.api_key === "string" && b.api_key.trim()) a.api_key = b.api_key.trim(); if (b.clear_key) a.api_key = ""; if ("interval_min" in b) a.interval_min = Math.max(1, Math.min(1440, +b.interval_min || 30)); if ("simulate" in b) DB.settings.simulate = !!b.simulate; return settingsPayload(); });
 const DEMO_NOTE = "В демо-версии внешние API отключены. Запустите приложение локально (python run.py) и подключите модель в настройках";
 R("POST", "/ai/test", "ai_settings", async () => { throw err(DEMO_NOTE, 502); }); R("POST", "/ai/models", "ai_settings", async () => { throw err(DEMO_NOTE, 502); });
-R("POST", "/deals/([\\w-]+)/ai-analyze", "view", async (b, m) => { const d = getDeal(m[1], false), now = nowS(), rep = rulesReport(d, dealDetail(d, now), now); DB.ai_reports[d.id] = rep; return rep; });
-R("POST", "/deals/([\\w-]+)/ai-chat", "view", async (b, m) => { const d = getDeal(m[1], false), q = String(b.question || "").trim(); if (!q) throw err("Введите вопрос", 400); const now = nowS(), det = dealDetail(d, now), rep = rulesReport(d, det, now); return { answer: `Демо-режим: нейросеть не подключена, отвечаю по правилам мониторинга.\n\nПокрытие сейчас ${det.coverage_now == null ? "—" : c2(det.coverage_now)} при ковенанте ${c2(det.forecast.covenant)}. ${rep.summary}\n` + rep.findings.slice(0, 5).map(f => `• ${f.title}${f.server ? " (" + f.server + (f.gpu != null ? ", GPU " + f.gpu : "") + ")" : ""}: ${f.detail}`).join("\n") + (rep.recommendations.length ? "\n\nРекомендации:\n" + rep.recommendations.map(r => "• " + r).join("\n") : "") }; });
+R("POST", "/deals/([\\w-]+)/ai-analyze", "view", async (b, m) => {
+  const d = getDeal(m[1], false), now = nowS(), inc = DB.inc[d.id];
+  const rec = REC && (inc ? (REC.incidents[d.id] || {})[inc] : (REC.deals[d.id] || {}).report);
+  if (rec) { await sleep(1300 + Math.random() * 900); const rep = { ...rec, source: "ai", model: REC.model, ts: now, recorded: true }; DB.ai_reports[d.id] = rep; return rep; }
+  const rep = rulesReport(d, dealDetail(d, now), now); DB.ai_reports[d.id] = rep; return rep;
+});
+R("POST", "/deals/([\\w-]+)/ai-chat", "view", async (b, m) => { const d = getDeal(m[1], false), q = String(b.question || "").trim(); if (!q) throw err("Введите вопрос", 400); const now = nowS(), det = dealDetail(d, now), rep = rulesReport(d, det, now);
+  const ans = REC && !DB.inc[d.id] && ((REC.deals[d.id] || {}).chat || {})[q]; if (ans) { await sleep(900 + Math.random() * 700); return { answer: ans }; }
+  return { answer: `${REC ? "В публичном демо живой ключ не подключён: на свободные вопросы отвечаю по правилам, а записанные ответы GigaChat доступны по подсказкам под полем ввода." : "Демо-режим: нейросеть не подключена, отвечаю по правилам мониторинга."}\n\nПокрытие сейчас ${det.coverage_now == null ? "—" : c2(det.coverage_now)} при ковенанте ${c2(det.forecast.covenant)}. ${rep.summary}\n` + rep.findings.slice(0, 5).map(f => `• ${f.title}${f.server ? " (" + f.server + (f.gpu != null ? ", GPU " + f.gpu : "") + ")" : ""}: ${f.detail}`).join("\n") + (rep.recommendations.length ? "\n\nРекомендации:\n" + rep.recommendations.map(r => "• " + r).join("\n") : "") }; });
 R("POST", "/deals/([\\w-]+)/incident", "reassess", async (b, m) => {
   const d = getDeal(m[1], false), srv = d.servers[d.servers.length - 1];
   if (b.type === "overheat") srv.gpus.slice(0, 3).forEach(g => { g.temp = 91; g.hot = true; }); else if (b.type === "swap") srv.gpus[srv.gpus.length - 1].actual_serial = "1654029999" + hex(3); else if (b.type === "offline") { srv.frozen = true; srv.last_seen = nowS() - 26 * 3600; }
   else if (b.type === "reset") d.servers.forEach(s => { delete s.frozen; s.last_seen = nowS(); s.gpus.forEach(g => { delete g.hot; if (g.actual_serial && g.actual_serial !== g.serial && g.serial !== "1654023118915") g.actual_serial = g.serial; if ((g.temp || 0) > 80) g.temp = 66; }); }); else throw err("Неизвестный тип инцидента", 400);
-  syncAlerts(d); return { ok: true };
+  DB.inc[d.id] = b.type === "reset" ? null : b.type; syncAlerts(d); return { ok: true };
 });
 
 window.CC_DEMO = async function (path, opts) {

@@ -7,7 +7,14 @@ demo = (root / "demo/demo.js").read_text("utf-8")
 parts = [("demo.js", demo)] + [(n, (root / "web/js" / n).read_text("utf-8")) for n in ("core.js", "auth.js", "portfolio.js", "wizard.js", "deal.js", "notif.js")]
 for name, src in parts:
     assert "</script" not in src.lower(), name
-scripts = "".join(f"<script>{src}</script>\n" for _, src in parts)
+rec_path = root / "docs/ai_recordings.json"
+rec = ""
+if rec_path.exists():
+    import json
+    raw = json.dumps(json.loads(rec_path.read_text("utf-8")), ensure_ascii=False).replace("</", "<\\/")
+    rec = f"<script>window.CC_REC={raw};</script>\n"
+    print("записанные ответы ИИ включены:", rec_path)
+scripts = rec + "".join(f"<script>{src}</script>\n" for _, src in parts)
 html = f"""<title>ComputeCollateral</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>{css}</style>

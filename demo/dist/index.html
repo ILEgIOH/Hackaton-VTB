@@ -404,7 +404,9 @@ function serversView(deal, now) {
 }
 
 /* ---------- состояние и демо-данные ---------- */
-const DB = { users: USERS, deals: {}, notifications: [], documents: {}, ai_reports: {}, outbox: [], requests: {}, blobs: {}, settings: { ai: { enabled: false, base_url: "https://api.openai.com/v1", model: "gpt-4o-mini", interval_min: 30, api_key: "" }, simulate: true } };
+const REC = window.CC_REC || null;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const DB = { inc: {}, users: USERS, deals: {}, notifications: [], documents: {}, ai_reports: {}, outbox: [], requests: {}, blobs: {}, settings: { ai: { enabled: false, base_url: "https://api.openai.com/v1", model: "gpt-4o-mini", interval_min: 30, api_key: "" }, simulate: true } };
 let ME = null; const FAILS = {};
 function innMake(b9) { const d = [...b9].map(Number); return b9 + String(d.reduce((a, x, i) => a + x * [2, 4, 10, 3, 5, 9, 4, 6, 8][i], 0) % 11 % 10); }
 function innOk(inn) { if (!/^(\d{10}|\d{12})$/.test(inn)) return false; const d = [...inn].map(Number), chk = ws => ws.reduce((a, w, i) => a + w * d[i], 0) % 11 % 10; if (inn.length === 10) return chk([2, 4, 10, 3, 5, 9, 4, 6, 8]) === d[9]; return chk([7, 2, 4, 10, 3, 5, 9, 4, 6, 8]) === d[10] && chk([3, 7, 2, 4, 10, 3, 5, 9, 4, 6, 8]) === d[11]; }
@@ -575,7 +577,7 @@ function finalizeCalcs(now) {
 function dealPayload(deal) {
   const now = nowS(), detail = dealDetail(deal, now), models = {}; Object.keys(detail.valuation.per_model).forEach(k => models[k] = MODELS[k].scen); const asm = deal.assessments || [];
   return { id: deal.id, borrower: deal.borrower, inn: deal.inn, location: deal.location, contract: deal.contract, application: deal.application, contact: deal.contact, contact_email: deal.contact_email, status: deal.status, loan: deal.loan, telemetry_mode: deal.telemetry_mode, agent_token: deal.agent_token, agent_key: deal.agent_key, detail, servers: serversView(deal, now),
-    alerts: DB.notifications.filter(n => n.deal_id === deal.id && OPEN.includes(n.status)).length, models, thresholds: TH, ai_report: DB.ai_reports[deal.id] || null, ai_ready: false, assessed_at: asm.length ? asm[asm.length - 1].ts : null, last_assessment: asm.length ? asm[asm.length - 1] : null, tranches_suspended: !!deal.tranches_suspended, market_updated: MARKET.updated };
+    alerts: DB.notifications.filter(n => n.deal_id === deal.id && OPEN.includes(n.status)).length, models, thresholds: TH, ai_report: DB.ai_reports[deal.id] || null, ai_ready: !!REC, ai_recorded: REC ? { model: REC.model, ts: REC.recorded_at, questions: REC.questions } : null, assessed_at: asm.length ? asm[asm.length - 1].ts : null, last_assessment: asm.length ? asm[asm.length - 1] : null, tranches_suspended: !!deal.tranches_suspended, market_updated: MARKET.updated };
 }
 const LIMITS = { amount: [1e6, 5e8, "Введите сумму от 1 до 500 млн ₽"], term: [6, 60, "Срок от 6 до 60 месяцев"], rate: [1, 40, "Ставка от 1 до 40 % годовых"], covenant: [1, 2, "Ковенант от 1,00 до 2,00"] };
 function validateLoan(b, needDate, covDefault) {
@@ -678,13 +680,20 @@ R("POST", "/settings/thresholds", "edit_thresholds", async b => { const cov = pa
 R("POST", "/settings/ai", "ai_settings", async b => { const a = DB.settings.ai; ["base_url", "model"].forEach(k => { if (typeof b[k] === "string" && b[k].trim()) a[k] = b[k].trim(); }); if ("enabled" in b) a.enabled = !!b.enabled; if (typeof b.api_key === "string" && b.api_key.trim()) a.api_key = b.api_key.trim(); if (b.clear_key) a.api_key = ""; if ("interval_min" in b) a.interval_min = Math.max(1, Math.min(1440, +b.interval_min || 30)); if ("simulate" in b) DB.settings.simulate = !!b.simulate; return settingsPayload(); });
 const DEMO_NOTE = "В демо-версии внешние API отключены. Запустите приложение локально (python run.py) и подключите модель в настройках";
 R("POST", "/ai/test", "ai_settings", async () => { throw err(DEMO_NOTE, 502); }); R("POST", "/ai/models", "ai_settings", async () => { throw err(DEMO_NOTE, 502); });
-R("POST", "/deals/([\\w-]+)/ai-analyze", "view", async (b, m) => { const d = getDeal(m[1], false), now = nowS(), rep = rulesReport(d, dealDetail(d, now), now); DB.ai_reports[d.id] = rep; return rep; });
-R("POST", "/deals/([\\w-]+)/ai-chat", "view", async (b, m) => { const d = getDeal(m[1], false), q = String(b.question || "").trim(); if (!q) throw err("Введите вопрос", 400); const now = nowS(), det = dealDetail(d, now), rep = rulesReport(d, det, now); return { answer: `Демо-режим: нейросеть не подключена, отвечаю по правилам мониторинга.\n\nПокрытие сейчас ${det.coverage_now == null ? "—" : c2(det.coverage_now)} при ковенанте ${c2(det.forecast.covenant)}. ${rep.summary}\n` + rep.findings.slice(0, 5).map(f => `• ${f.title}${f.server ? " (" + f.server + (f.gpu != null ? ", GPU " + f.gpu : "") + ")" : ""}: ${f.detail}`).join("\n") + (rep.recommendations.length ? "\n\nРекомендации:\n" + rep.recommendations.map(r => "• " + r).join("\n") : "") }; });
+R("POST", "/deals/([\\w-]+)/ai-analyze", "view", async (b, m) => {
+  const d = getDeal(m[1], false), now = nowS(), inc = DB.inc[d.id];
+  const rec = REC && (inc ? (REC.incidents[d.id] || {})[inc] : (REC.deals[d.id] || {}).report);
+  if (rec) { await sleep(1300 + Math.random() * 900); const rep = { ...rec, source: "ai", model: REC.model, ts: now, recorded: true }; DB.ai_reports[d.id] = rep; return rep; }
+  const rep = rulesReport(d, dealDetail(d, now), now); DB.ai_reports[d.id] = rep; return rep;
+});
+R("POST", "/deals/([\\w-]+)/ai-chat", "view", async (b, m) => { const d = getDeal(m[1], false), q = String(b.question || "").trim(); if (!q) throw err("Введите вопрос", 400); const now = nowS(), det = dealDetail(d, now), rep = rulesReport(d, det, now);
+  const ans = REC && !DB.inc[d.id] && ((REC.deals[d.id] || {}).chat || {})[q]; if (ans) { await sleep(900 + Math.random() * 700); return { answer: ans }; }
+  return { answer: `${REC ? "В публичном демо живой ключ не подключён: на свободные вопросы отвечаю по правилам, а записанные ответы GigaChat доступны по подсказкам под полем ввода." : "Демо-режим: нейросеть не подключена, отвечаю по правилам мониторинга."}\n\nПокрытие сейчас ${det.coverage_now == null ? "—" : c2(det.coverage_now)} при ковенанте ${c2(det.forecast.covenant)}. ${rep.summary}\n` + rep.findings.slice(0, 5).map(f => `• ${f.title}${f.server ? " (" + f.server + (f.gpu != null ? ", GPU " + f.gpu : "") + ")" : ""}: ${f.detail}`).join("\n") + (rep.recommendations.length ? "\n\nРекомендации:\n" + rep.recommendations.map(r => "• " + r).join("\n") : "") }; });
 R("POST", "/deals/([\\w-]+)/incident", "reassess", async (b, m) => {
   const d = getDeal(m[1], false), srv = d.servers[d.servers.length - 1];
   if (b.type === "overheat") srv.gpus.slice(0, 3).forEach(g => { g.temp = 91; g.hot = true; }); else if (b.type === "swap") srv.gpus[srv.gpus.length - 1].actual_serial = "1654029999" + hex(3); else if (b.type === "offline") { srv.frozen = true; srv.last_seen = nowS() - 26 * 3600; }
   else if (b.type === "reset") d.servers.forEach(s => { delete s.frozen; s.last_seen = nowS(); s.gpus.forEach(g => { delete g.hot; if (g.actual_serial && g.actual_serial !== g.serial && g.serial !== "1654023118915") g.actual_serial = g.serial; if ((g.temp || 0) > 80) g.temp = 66; }); }); else throw err("Неизвестный тип инцидента", 400);
-  syncAlerts(d); return { ok: true };
+  DB.inc[d.id] = b.type === "reset" ? null : b.type; syncAlerts(d); return { ok: true };
 });
 
 window.CC_DEMO = async function (path, opts) {
@@ -1526,18 +1535,21 @@ function aiTab(D) {
   const draw = r => {
     el.innerHTML = `<div class="two"><div class="card"><div class="row-between"><h2>Анализ ИИ-наблюдателя</h2><button class="btn primary sm" id="run">Запустить анализ</button></div>
       <p class="muted" style="font-size:13px;margin:-8px 0 14px">Справочная подсказка. На стоимость залога, статусы и решения по сделке не влияет: решения принимает сотрудник банка.</p>
-      ${r ? `<div class="row" style="margin-bottom:12px"><span class="pill ${r.risk}">${RISK[r.risk]}</span><span class="muted" style="font-size:14px">${r.source === "ai" ? "модель " + esc(r.model) : "правила (ИИ не подключён)"} · ${fdt(r.ts)}</span></div><p style="margin:0 0 14px;font-size:17px">${esc(r.summary)}</p>
+      ${r ? `<div class="row" style="margin-bottom:12px"><span class="pill ${r.risk}">${RISK[r.risk]}</span><span class="muted" style="font-size:14px">${r.source === "ai" ? "модель " + esc(r.model) + (r.recorded ? " · записанный ответ" : "") : "правила (ИИ не подключён)"} · ${fdt(r.ts)}</span></div><p style="margin:0 0 14px;font-size:17px">${esc(r.summary)}</p>
       ${r.ai_error ? `<div class="info warn" style="padding:12px 16px;font-size:14px">ИИ недоступен: ${esc(r.ai_error)}. Показаны результаты правил.</div>` : ""}
       ${r.findings.map(x => `<div class="find"><span class="sv ${x.severity}"></span><div><b>${esc(x.title)}${x.server ? ` — ${esc(x.server)}${x.gpu != null ? ", GPU " + x.gpu : ""}` : ""}</b><span>${esc(x.detail || "")}</span></div></div>`).join("") || '<p class="muted">Замечаний нет.</p>'}
       ${r.recommendations?.length ? `<h2 style="font-size:17px;margin:20px 0 6px">Рекомендации</h2><ul style="margin:0;padding-left:20px">${r.recommendations.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}` : `<p class="muted">Анализ ещё не запускался.</p>`}
       ${D.ai_ready ? "" : `<div class="info warn" style="margin:20px 0 0;padding:14px 18px;font-size:14px">Подключите модель в <a href="#/settings">настройках</a> — она будет разбирать телеметрию вместе с правилами.</div>`}</div>
      <div class="card" style="padding:34px"><h2>Спросить ИИ о сделке</h2><div class="chat"><div class="msgs" id="msgs"><div class="msg a">Задайте вопрос по залогу: например, «какие серверы вызывают опасения?» или «что будет с покрытием через год?»</div></div>
-      <div class="row"><input class="inp" id="qq" placeholder="Ваш вопрос" style="flex:1"><button class="btn primary" id="ask">Спросить</button></div></div>
+      <div class="row"><input class="inp" id="qq" placeholder="Ваш вопрос" style="flex:1"><button class="btn primary" id="ask">Спросить</button></div>
+      ${D.ai_recorded ? `<div class="preset" id="qs" style="margin-top:12px">${D.ai_recorded.questions.map(q => `<button type="button">${esc(q)}</button>`).join("")}</div><p class="muted" style="font-size:12px;margin:8px 0 0">Это записанные ответы ${esc(D.ai_recorded.model)}: в публичном демо живой ключ не подключён.</p>` : ""}</div>
       ${can("reassess") ? `<h2 style="font-size:17px;margin:34px 0 8px">Демонстрация инцидентов</h2><p class="muted" style="font-size:14px;margin:0 0 12px">Имитирует событие на серверах заёмщика — мониторинг создаст уведомление, ИИ проанализирует ситуацию.</p>
       <div class="row">${[["overheat", "Перегрев"], ["swap", "Подмена карты"], ["offline", "Обрыв связи"], ["reset", "Сбросить"]].map(([k, t]) => `<button class="btn sm" data-inc="${k}">${t}</button>`).join("")}</div>` : ""}</div></div>`;
     $("#run").onclick = async e => { e.target.disabled = true; e.target.textContent = "Анализируем…"; try { draw(await api(`/deals/${id}/ai-analyze`, { body: {} })); } catch (er) { toast(er.message, true); e.target.disabled = false; e.target.textContent = "Запустить анализ"; } };
     const msgs = $("#msgs"), say = (c, t) => { const d = document.createElement("div"); d.className = "msg " + c; d.textContent = t; msgs.appendChild(d); msgs.scrollTop = msgs.scrollHeight; return d; };
-    const ask = async () => { const q = $("#qq").value.trim(); if (!q) return; $("#qq").value = ""; say("u", q); const w = say("a", "…"); try { w.textContent = (await api(`/deals/${id}/ai-chat`, { body: { question: q } })).answer; } catch (e) { w.textContent = e.message; } };
+    const typeText = (el, text) => new Promise(res => { let i = 0; const step = Math.max(2, Math.ceil(text.length / 140)); const t = setInterval(() => { i += step; el.textContent = text.slice(0, i); msgs.scrollTop = msgs.scrollHeight; if (i >= text.length) { clearInterval(t); res(); } }, 18); });
+    const ask = async () => { const q = $("#qq").value.trim(); if (!q) return; $("#qq").value = ""; say("u", q); const w = say("a", "…"); try { await typeText(w, (await api(`/deals/${id}/ai-chat`, { body: { question: q } })).answer); } catch (e) { w.textContent = e.message; } };
+    $$("#qs button").forEach(b => b.onclick = () => { $("#qq").value = b.textContent; ask(); });
     $("#ask").onclick = ask; $("#qq").onkeydown = e => e.key === "Enter" && ask();
     $$("[data-inc]").forEach(b => b.onclick = async () => { try { await api(`/deals/${id}/incident`, { body: { type: b.dataset.inc } }); toast("Готово — смотрите «Уведомления» и запустите анализ"); } catch (e) { toast(e.message, true); } });
   };
@@ -1646,7 +1658,7 @@ async function viewSettings() {
    <div class="grid2"><div class="fld"><label>Адрес API (base URL)</label><input class="inp" id="au" value="${esc(a.base_url)}"></div><div class="fld"><label>Модель</label><input class="inp" id="am" list="ml" value="${esc(a.model)}"><datalist id="ml"></datalist></div>
     <div class="fld"><label>API-ключ ${a.has_key ? `<span class="ok-t">· ${a.key_from_env ? "задан в .env" : "сохранён"}</span>` : ""}</label><input class="inp" id="ak" type="password" autocomplete="off" placeholder="${a.has_key ? "оставьте пустым, чтобы не менять" : "sk-…"}"></div><div class="fld"><label>Анализ каждые, мин</label><input class="inp" id="ai" type="number" min="1" value="${a.interval_min}"></div></div>
    <label class="chk"><input type="checkbox" id="ae" ${a.enabled ? "checked" : ""}> Включить ИИ-анализ телеметрии</label>
-   <div class="row" style="margin-top:16px"><button class="btn primary" id="sv">Сохранить</button><button class="btn" id="ts">Проверить подключение</button><button class="btn" id="lm">Список моделей</button>${a.has_key && !a.key_from_env ? '<button class="btn" id="ck">Удалить ключ</button>' : ""}</div><div id="tr" style="margin-top:14px"></div>
+   <div class="row" style="margin-top:16px"><button class="btn primary" id="sv">Сохранить</button><button class="btn" id="ts">Проверить подключение</button><button class="btn" id="lm">Список моделей</button>${a.has_key && !String(a.base_url).startsWith("stub") ? '<button class="btn" id="rc">Записать ответы ИИ для демо</button>' : ""}${a.has_key && !a.key_from_env ? '<button class="btn" id="ck">Удалить ключ</button>' : ""}</div><div id="tr" style="margin-top:14px"></div>
    <p class="muted" style="font-size:13px;margin:18px 0 0">Ключ можно задать и без интерфейса: файл <code>.env</code> (CC_AI_API_KEY, CC_AI_BASE_URL, CC_AI_MODEL). В интерфейс ключ не возвращается.</p>
    <label class="chk" style="margin-top:12px"><input type="checkbox" id="sim" ${S.simulate ? "checked" : ""}> Симулировать агентов в демо-сделках</label></div>` : ""}`);
   $("#save").onclick = async e => {
@@ -1666,6 +1678,11 @@ async function viewSettings() {
     $("#sim").onchange = () => api("/settings/ai", { body: aiBody() }).catch(e => toast(e.message, true));
     const ck = $("#ck"); if (ck) ck.onclick = async () => { await api("/settings/ai", { body: aiBody({ clear_key: true, api_key: "" }) }); toast("Ключ удалён"); viewSettings(); };
     $("#ts").onclick = async e => { e.target.disabled = true; $("#tr").innerHTML = '<span class="muted"><span class="spin"></span> Проверяем…</span>'; try { await api("/settings/ai", { body: aiBody() }); const r = await api("/ai/test", { body: {} }); $("#tr").innerHTML = `<div class="info" style="margin:0"><b>Подключение работает</b> · ${esc(r.model)}<br>Ответ: ${esc(r.reply)}</div>`; } catch (er) { $("#tr").innerHTML = `<div class="info bad" style="margin:0">${esc(er.message)}</div>`; } e.target.disabled = false; };
+    const rc = $("#rc"); if (rc) rc.onclick = async e => {
+      e.target.disabled = true; $("#tr").innerHTML = '<span class="muted"><span class="spin"></span> Нейросеть отвечает по всем сделкам и сценариям инцидентов, это займёт около минуты…</span>';
+      try { await api("/settings/ai", { body: aiBody() }); const r = await api("/ai/record", { body: {} }); $("#tr").innerHTML = `<div class="info" style="margin:0"><b>Готово</b> · ${esc(r.model)}: сделок ${r.deals}, ответов в чате ${r.answers}.<br>Файл сохранён: <code>${esc(r.path)}</code><br>Отправьте его разработчику, чтобы ответы попали в публичное демо.</div>`; } catch (er) { $("#tr").innerHTML = `<div class="info warn" style="margin:0">${esc(er.message)}</div>`; }
+      e.target.disabled = false;
+    };
     $("#lm").onclick = async e => { e.target.disabled = true; try { await api("/settings/ai", { body: aiBody() }); const r = await api("/ai/models", { body: {} }); $("#ml").innerHTML = r.models.map(m => `<option value="${esc(m)}">`).join(""); toast(`Моделей найдено: ${r.models.length}. Выберите в поле «Модель»`); $("#am").focus(); } catch (er) { $("#tr").innerHTML = `<div class="info bad" style="margin:0">${esc(er.message)}</div>`; } e.target.disabled = false; };
   }
 }

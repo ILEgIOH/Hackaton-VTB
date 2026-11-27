@@ -223,6 +223,26 @@ class AI(unittest.TestCase):
         self.assertEqual(ai.effective_model(cfg), "GigaChat-2-Max")
         ai._MODEL_FIX.clear()
 
+    def test_recorder_collects_real_answers(self):
+        from unittest import mock
+        from compute_collateral import recorder, seed, server as srv
+        from compute_collateral.store import Store
+        import tempfile, os
+        os.environ.setdefault("CC_DATA_DIR", tempfile.mkdtemp())
+        store = Store(); seed.seed(store)
+        cfg = dict(enabled=True, base_url="https://api.giga.chat/v1", api_key="k", model="GigaChat-2-Max")
+        fake = json.dumps(dict(risk="medium", summary="Тест", findings=[dict(severity="warning", title="Т", detail="д")], recommendations=["р"]), ensure_ascii=False)
+        with mock.patch.object(ai, "chat", return_value=fake):
+            data = recorder.record(store.db["deals"], cfg, srv.App.apply_incident)
+        self.assertEqual(data["model"], "GigaChat-2-Max")
+        self.assertIn("neurocluster", data["incidents"])
+        self.assertEqual(set(data["incidents"]["neurocluster"]), {"overheat", "swap", "offline"})
+        d0 = next(iter(data["deals"].values()))
+        self.assertEqual(d0["report"]["source"], "ai")
+        self.assertEqual(set(d0["chat"]), set(recorder.QUESTIONS))
+        # реальные сделки не изменились инцидентами
+        self.assertFalse(any(g.get("hot") for d in store.db["deals"].values() for s in d["servers"] for g in s["gpus"]))
+
     def test_stub_provider(self):
         d = make_deal()
         d["servers"][0]["gpus"][0].update(temp=90)

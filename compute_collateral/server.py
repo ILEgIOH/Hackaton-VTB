@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from . import ai, alerts, docs, engine, mailer, market, parsers, report, users
+from . import ai, alerts, docs, engine, mailer, market, parsers, recorder, report, users
 from .market import MODELS
 from .store import DATA_DIR, Store, check_password, hash_password
 
@@ -194,6 +194,29 @@ class App:
         """В публичном демо (CC_PUBLIC_DEMO=1) нельзя менять адрес/ключ нейросети: иначе сервер ходил бы по чужим адресам."""
         if __import__("os").environ.get("CC_PUBLIC_DEMO"):
             raise ApiError("В публичном демо подключение нейросети отключено (работает заглушка ИИ)", 403)
+
+    @staticmethod
+    def apply_incident(deal, kind):
+        srv = deal["servers"][-1]
+        if kind == "overheat":
+            for g in srv["gpus"][:3]:
+                g.update(temp=91, hot=True)
+        elif kind == "swap":
+            srv["gpus"][-1]["actual_serial"] = "1654029999" + secrets.token_hex(2)[:3].replace("a", "1")
+        elif kind == "offline":
+            srv.update(frozen=True, last_seen=time.time() - 26 * 3600)
+        elif kind == "reset":
+            for s in deal["servers"]:
+                s.pop("frozen", None)
+                s["last_seen"] = time.time()
+                for g in s["gpus"]:
+                    g.pop("hot", None)
+                    if g.get("actual_serial") and g["actual_serial"] != g["serial"] and g["serial"] != "1654023118915":
+                        g["actual_serial"] = g["serial"]
+                    if g.get("temp", 0) > 80:
+                        g["temp"] = 66
+        else:
+            raise ApiError("Неизвестный тип инцидента")
 
     # ----- routes -----
     def _register(self):
@@ -735,6 +758,20 @@ class App:
             except Exception as e:
                 raise ApiError(str(e), 502)
 
+        @r("POST", "/api/ai/record", perm="ai_settings")
+        def ai_record(ctx):
+            """Записывает настоящие ответы подключённой нейросети в docs/ai_recordings.json для автономного демо."""
+            self.public_demo_guard()
+            c = self.cfg()
+            if ai.is_stub(c) or not ai.ai_ready(c):
+                raise ApiError("Сначала подключите реальную нейросеть (не заглушку)", 422)
+            try:
+                data = recorder.record(self.db["deals"], c, self.apply_incident)
+            except Exception as e:
+                raise ApiError(f"Запись не удалась: {e}", 502)
+            path = recorder.save(data)
+            return dict(ok=True, path=str(path), model=data["model"], deals=len(data["deals"]), answers=sum(len(v["chat"]) for v in data["deals"].values()))
+
         @r("POST", r"/api/deals/(?P<id>[\w-]+)/ai-analyze", perm="view")
         def ai_analyze(ctx, id):
             deal = self.deal(id, allow_draft=False)
@@ -758,27 +795,7 @@ class App:
         def incident(ctx, id):
             """Демо: смоделировать инцидент на серверах, чтобы показать реакцию мониторинга."""
             deal = self.deal(id, allow_draft=False)
-            kind = ctx.json().get("type")
-            srv = deal["servers"][-1]
-            if kind == "overheat":
-                for g in srv["gpus"][:3]:
-                    g.update(temp=91, hot=True)
-            elif kind == "swap":
-                srv["gpus"][-1]["actual_serial"] = "1654029999" + secrets.token_hex(2)[:3].replace("a", "1")
-            elif kind == "offline":
-                srv.update(frozen=True, last_seen=time.time() - 26 * 3600)
-            elif kind == "reset":
-                for s in deal["servers"]:
-                    s.pop("frozen", None)
-                    s["last_seen"] = time.time()
-                    for g in s["gpus"]:
-                        g.pop("hot", None)
-                        if g.get("actual_serial") and g["actual_serial"] != g["serial"] and g["serial"] != "1654023118915":
-                            g["actual_serial"] = g["serial"]
-                        if g.get("temp", 0) > 80:
-                            g["temp"] = 66
-            else:
-                raise ApiError("Неизвестный тип инцидента")
+            self.apply_incident(deal, ctx.json().get("type"))
             alerts.sync(self.db, deal)
             st.save()
             return dict(ok=True)
