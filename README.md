@@ -23,7 +23,8 @@ pip install -r requirements.txt        # без reportlab / python-docx рабо
 python run.py                          # окно приложения (pywebview) или браузер: http://127.0.0.1:8765/
 python run.py --browser                # принудительно браузер
 python run.py --reset                  # пересоздать демо-данные
-python -m unittest discover -s tests   # тесты (41)
+python -m unittest discover -s tests   # тесты (63)
+python tools/bench.py                  # замеры: движок, приём телеметрии, сигнал о подмене
 ```
 
 Вход: `e.sokolova@bank.ru` / `Compute2026`. Другие роли — тот же пароль:
@@ -59,12 +60,21 @@ python -m unittest discover -s tests   # тесты (41)
 
 **Вариант 3 — Netlify.** Статичное демо, как в варианте 2. Быстро: app.netlify.com → *Add new site* → *Deploy manually* → перетащить папку `docs` (или файл `index.html`). Через Git: *Import from Git* → репозиторий, ветка `main`, *Publish directory* `docs`, команда сборки пустая (настройка уже в `netlify.toml`). Серверную версию (Python) Netlify не запускает, для неё нужен Render.
 
+## Безопасность, комплаенс и эксплуатация (Спринт 2)
+
+* **Журнал аудита** с цепочкой хэшей SHA-256 и проверкой целостности — экран «Безопасность и аудит» в меню пользователя.
+* **Закрытый контур** `CC_ONPREM=1`: ИИ и почта только на внутренних адресах, агенты — только с подписью HMAC-SHA256.
+* **Обезличивание и маскирование** данных для ИИ (реквизиты, контакты, серийные номера, телефоны, карты, СНИЛС — метками; в ответе реквизиты восстанавливаются), **проверка ИНН по перечню 115-ФЗ**, **плановая переоценка по 590-П** раз в 90 дней.
+* `GET /api/health`, `GET /api/metrics` (Prometheus), `Dockerfile` и `deploy/docker-compose.yml` (с локальной моделью ИИ).
+
+Подробно: [docs/SECURITY_COMPLIANCE.md](docs/SECURITY_COMPLIANCE.md) · [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) ·
+[docs/PILOT_PLAN.md](docs/PILOT_PLAN.md) · [docs/openapi.yaml](docs/openapi.yaml) · [CHANGELOG.md](CHANGELOG.md)
+
 ## Подключение нейросети по API
 
 *Настройки → «Нейросеть: подключение по API»* (доступно аналитику и управлению рисков). Два режима:
 - **Заглушка** — пресет «Заглушка (без сети)» (`base_url = stub://local`): ключ и интернет не нужны, ИИ-ответ собирается из правил с пометкой «[Заглушка ИИ]». Годится для демо, пока реальный API не выбран.
-- **Российские (рекомендуется):** пресеты **YandexGPT** (OpenAI-совместимый эндпоинт Yandex Cloud, модель `gpt://<ID каталога>/yandexgpt/latest`) и
-  **GigaChat** (ключ обменивается на токен автоматически; нужен сертификат Минцифры — `CC_AI_CA_BUNDLE`). См. `.env.example`.
+- **GigaChat (рекомендуется):** пресет «GigaChat (Сбер)» (ключ обменивается на токен автоматически; нужен сертификат Минцифры — `CC_AI_CA_BUNDLE`). См. `.env.example`.
 - **OpenAI-совместимый** (`/chat/completions`): OpenAI, OpenRouter, Groq, локальные Ollama / vLLM / LM Studio.
 Кнопки: быстрые пресеты провайдеров, «Список моделей» (`GET /models`), «Проверить подключение».
 

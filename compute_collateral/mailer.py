@@ -12,6 +12,13 @@ def send(db: dict, to: str, subject: str, body: str, sender: str, kind: str = "m
                kind=kind, deal_id=deal_id, status="queued")
     host = os.environ.get("CC_SMTP_HOST")
     if host:
+        from . import security
+        try:
+            security.check_egress(host, "Почтовый сервер")
+        except PermissionError as e:
+            rec.update(status="failed", error=str(e))
+            db["outbox"].append(rec)
+            raise RuntimeError(str(e)) from None
         msg = EmailMessage()
         msg["From"], msg["To"], msg["Subject"] = os.environ.get("CC_SMTP_FROM", sender), to, subject
         msg.set_content(body)

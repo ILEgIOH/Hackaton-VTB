@@ -67,6 +67,8 @@ st=np.stack([L,R],1)*0.89
 # мягкий лимитер
 st=np.tanh(st*1.3)/np.tanh(1.3)
 pcm=(st*32767).astype('<i2')
-with wave.open('out/score.wav','wb') as w:
+import os
+os.makedirs(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'out'), exist_ok=True)
+with wave.open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'out', 'score.wav'),'wb') as w:
     w.setnchannels(2);w.setsampwidth(2);w.setframerate(SR);w.writeframes(pcm.tobytes())
 print('ok',D)

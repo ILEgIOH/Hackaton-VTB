@@ -1,0 +1,30 @@
+# Пилот в тестовом контуре банка: сервис + (опционально) локальная модель ИИ без выхода в интернет.
+#   docker compose -f deploy/docker-compose.yml up -d
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.onprem
+    restart: unless-stopped
+    ports: ["8765:8765"]          # наружу публикует балансировщик банка с TLS (CC_HTTPS=1 включает Secure-cookie)
+    volumes: ["cc-data:/data"]
+    env_file: [../.env]
+    environment:
+      CC_ONPREM: "1"              # ИИ и почта — только внутренние адреса
+      CC_AGENT_SIGNED_ONLY: "1"   # только подписанные пакеты агентов
+      CC_ALLOWED_HOSTS: "llm"     # имя сервиса локальной модели ниже
+      CC_AI_BASE_URL: "http://llm:8000/v1"
+      CC_TELEMETRY_DAYS: "400"
+  # Локальная LLM с OpenAI-совместимым API (vLLM). Веса модели банк загружает из своего реестра;
+  # подойдёт открытая российская модель или любая модель, одобренная ИБ банка.
+  llm:
+    image: vllm/vllm-openai:latest
+    profiles: ["llm"]             # включается явно: docker compose --profile llm up -d
+    command: ["--model", "/models/current", "--served-model-name", "local"]
+    volumes: ["/opt/models:/models:ro"]
+    deploy:
+      resources:
+        reservations:
+          devices: [{driver: nvidia, count: 1, capabilities: [gpu]}]
+volumes:
+  cc-data:

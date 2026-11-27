@@ -116,7 +116,7 @@ function shell(active, inner) {
     <span class="sp"></span>
     <div class="search-h">${ICON.search}<input id="hs" placeholder="Компания, серийный номер" autocomplete="off" aria-label="Поиск"><div class="sdrop" id="sd" hidden></div></div>
     <div class="user" data-act="usermenu" role="button" tabindex="0"><span class="avatar">${esc(ME.initials)}</span><span style="white-space:nowrap">${esc(ME.short)}<small>${esc(ME.role_label)}</small></span>
-      <div class="menu" id="umenu" hidden><div class="who"><b>${esc(ME.name)}</b><small>${esc(ME.role_label)}</small><small>${esc(ME.email)}</small></div><a href="#/settings">Настройки уведомлений</a><button class="out" data-act="logout">Выйти</button></div></div>
+      <div class="menu" id="umenu" hidden><div class="who"><b>${esc(ME.name)}</b><small>${esc(ME.role_label)}</small><small>${esc(ME.email)}</small></div><a href="#/settings">Настройки уведомлений</a><a href="#/security">Безопасность и аудит</a><button class="out" data-act="logout">Выйти</button></div></div>
   </header><main id="main">${inner}</main>`;
 }
 function render(active, inner) { $app.innerHTML = shell(active, inner); bindSearch(); }
@@ -183,6 +183,7 @@ async function route() {
     else if (page === "market") await viewMarket();
     else if (page === "notifications") await viewNotifications(query);
     else if (page === "settings") await viewSettings();
+    else if (page === "security") await viewSecurity();
     else location.hash = "#/portfolio";
   } catch (e) {
     if (e.status === 403) return noAccess();

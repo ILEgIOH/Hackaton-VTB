@@ -9,7 +9,7 @@ import urllib.error
 import urllib.request
 from datetime import date
 
-from . import engine
+from . import engine, security
 
 SEV_ORDER = {"info": 0, "warning": 1, "critical": 2}
 RISK_BY_SEV = {0: "low", 1: "medium", 2: "high"}
@@ -17,7 +17,8 @@ RISK_BY_SEV = {0: "low", 1: "medium", 2: "high"}
 SYSTEM_PROMPT = """Ты — аналитик банка, который следит за состоянием GPU-серверов, переданных в залог по кредиту.
 Тебе дают JSON-снимок телеметрии (температура, загрузка, наработка, совпадение серийных номеров, связь) и параметры кредита.
 Найди аномалии и риски для залога: подмена или вывод карт, перегрев, простой, нереалистичная наработка, потеря связи,
-угроза нарушения ковенанта покрытия. Не выдумывай данных, которых нет в снимке.
+угроза нарушения ковенанта покрытия. Не выдумывай данных, которых нет в снимке. Снимок обезличен: серийные номера заменены псевдонимами вида S-XXXXXX,
+поле serial_match показывает, совпадает ли фактический номер с договорным.
 Ответь СТРОГО одним JSON-объектом без пояснений вокруг:
 {"risk":"low|medium|high","summary":"1-2 предложения по-русски",
  "findings":[{"severity":"info|warning|critical","title":"...","detail":"...","server":"srv-01|null","gpu":0|null}],
@@ -125,6 +126,10 @@ def chat(cfg: dict, messages: list[dict], json_mode: bool = False, timeout: int 
     if is_stub(cfg):
         return chat_stub(messages)
     cfg = dict(cfg, model=effective_model(cfg))
+    try:
+        security.check_egress(cfg["base_url"], "Адрес нейросети")
+    except PermissionError as e:
+        raise RuntimeError(str(e)) from None
     body = dict(model=cfg["model"], messages=messages, temperature=0.2)
     if json_mode:
         body["response_format"] = {"type": "json_object"}
@@ -172,6 +177,15 @@ def extract_json(text: str) -> dict:
 # ---------- снимок и правила ----------
 
 def snapshot(deal: dict, detail: dict, now: float) -> dict:
+    """Снимок для нейросети. По умолчанию обезличен (security.deidentify_snapshot): без названия заёмщика,
+    номера договора и реальных серийных номеров."""
+    snap = _raw_snapshot(deal, detail, now)
+    if security.deidentify_enabled():
+        snap = security.deidentify_snapshot(snap, deal.get("agent_token", deal.get("id", "")))
+    return snap
+
+
+def _raw_snapshot(deal: dict, detail: dict, now: float) -> dict:
     return dict(
         borrower=deal["borrower"], contract=deal.get("contract"), telemetry_mode=deal.get("telemetry_mode"),
         loan=dict(amount=deal["loan"]["amount"], term_months=deal["loan"]["term"], rate=deal["loan"]["rate"],
@@ -259,45 +273,96 @@ def rules_report(deal: dict, detail: dict, now: float) -> dict:
                 source="rules", ts=now)
 
 
+def _finding_key(x: dict) -> tuple:
+    return (str(x.get("title", "")).strip().lower(), x.get("server"), x.get("gpu"))
+
+
+def _salt(deal: dict) -> str:
+    return deal.get("agent_token", deal.get("id", ""))
+
+
+def _prep(text: str, deal: dict) -> tuple[str, dict]:
+    """Маскирование свободного текста перед отправкой в модель (если обезличивание не отключено)."""
+    if not security.deidentify_enabled():
+        return text, {}
+    return security.mask_text(text, deal, _salt(deal))
+
+
+def _back(text: str, deal: dict) -> str:
+    return security.unmask_text(text, deal, _salt(deal)) if security.deidentify_enabled() else text
+
+
 def analyze(deal: dict, detail: dict, cfg: dict, now: float | None = None) -> dict:
+    """Правила работают всегда; ИИ только дополняет их.
+
+    Замечания правил нельзя ни убрать, ни ослабить ответом модели (иначе критичное замечание, например подмена карты,
+    могло бы пропасть из отчёта). Находки модели идут отдельно — ai_findings (source="ai"), дубли правил отсекаются.
+    Риск — не ниже, чем по правилам. Рекомендации правил сохраняются, рекомендации модели добавляются к ним.
+    """
     now = now or time.time()
     base = rules_report(deal, detail, now)
+    for x in base["findings"]:
+        x["source"] = "rules"
+    base["ai_findings"] = []
     if not ai_ready(cfg):
         return base
     snap = snapshot(deal, detail, now)
+    rules_txt, masked = _prep(json.dumps(base["findings"], ensure_ascii=False), deal)
     user = ("Снимок телеметрии:\n" + json.dumps(snap, ensure_ascii=False) +
-            "\n\nЗамечания, найденные детерминированными правилами:\n" + json.dumps(base["findings"], ensure_ascii=False))
+            "\n\nЗамечания, найденные детерминированными правилами:\n" + rules_txt)
     try:
         out = extract_json(chat(cfg, [dict(role="system", content=SYSTEM_PROMPT), dict(role="user", content=user)], json_mode=True))
-        findings = [x for x in out.get("findings", []) if isinstance(x, dict) and x.get("title")]
-        for x in findings:
-            x["severity"] = x.get("severity") if x.get("severity") in SEV_ORDER else "info"
-        risk = out.get("risk") if out.get("risk") in ("low", "medium", "high") else base["risk"]
-        # ИИ не вправе занижать риск, найденный жёсткими правилами
-        if RISK_BY_SEV and ("low", "medium", "high").index(risk) < ("low", "medium", "high").index(base["risk"]):
-            risk = base["risk"]
-        return dict(risk=risk, summary=str(out.get("summary", base["summary"])), findings=findings or base["findings"],
-                    recommendations=[str(r) for r in out.get("recommendations", [])] or base["recommendations"],
-                    source="ai", model=cfg["model"], ts=now, rules=base["findings"])
+        seen = {_finding_key(x) for x in base["findings"]}
+        extra = []
+        for x in out.get("findings", []):
+            if not (isinstance(x, dict) and x.get("title")) or _finding_key(x) in seen:
+                continue
+            seen.add(_finding_key(x))
+            extra.append(dict(severity=x.get("severity") if x.get("severity") in SEV_ORDER else "info",
+                              title=_back(str(x["title"]), deal), detail=_back(str(x.get("detail") or ""), deal),
+                              server=x.get("server"), gpu=x.get("gpu"), source="ai"))
+        levels = ("low", "medium", "high")
+        risk = out.get("risk") if out.get("risk") in levels else base["risk"]
+        risk = max(risk, base["risk"], key=levels.index)   # ИИ не вправе занижать риск, найденный жёсткими правилами
+        recs = list(base["recommendations"])
+        for r in out.get("recommendations", []):
+            r = _back(str(r), deal)
+            if r and r not in recs:
+                recs.append(r)
+        return dict(risk=risk, summary=_back(str(out.get("summary") or base["summary"]), deal),
+                    findings=base["findings"], ai_findings=extra, recommendations=recs,
+                    source="ai", model=effective_model(cfg), ts=now,
+                    deidentified=security.deidentify_enabled(), masked=masked)
     except Exception as e:  # сеть/формат — откатываемся на правила
         base["ai_error"] = str(e)
         return base
 
 
 def ask(deal: dict, detail: dict, cfg: dict, question: str, now: float | None = None) -> str:
+    return ask_ex(deal, detail, cfg, question, now)[0]
+
+
+def ask_ex(deal: dict, detail: dict, cfg: dict, question: str, now: float | None = None) -> tuple[str, dict]:
+    """-> (ответ, что замаскировано в вопросе). Вопрос сотрудника маскируется, в ответе реквизиты сделки восстанавливаются."""
     if not ai_ready(cfg):
         raise RuntimeError("ИИ не подключён: включите его в «Настройки → ИИ-наблюдатель» и укажите API-ключ")
     snap = snapshot(deal, detail, now or time.time())
+    q, masked = _prep(question, deal)
     msgs = [dict(role="system", content="Ты — аналитик банка по залогу GPU-серверов. Отвечай по-русски, кратко и по делу, "
-                 "опираясь только на переданные данные.\nДанные сделки:\n" + json.dumps(snap, ensure_ascii=False)),
-            dict(role="user", content=question)]
-    return chat(cfg, msgs)
+                 "опираясь только на переданные данные. Метки в квадратных скобках ([ЗАЁМЩИК], [ДОГОВОР], S-XXXXXX) "
+                 "заменяют скрытые данные — используй их как есть.\nДанные сделки:\n" + json.dumps(snap, ensure_ascii=False)),
+            dict(role="user", content=q)]
+    return _back(chat(cfg, msgs), deal), masked
 
 
 def list_models(cfg: dict) -> list[str]:
     """GET {base_url}/models — список моделей провайдера для выпадающего списка в настройках."""
     if is_stub(cfg):
         return ["stub-model"]
+    try:
+        security.check_egress(cfg["base_url"], "Адрес нейросети")
+    except PermissionError as e:
+        raise RuntimeError(str(e)) from None
     headers = {"Authorization": f"Bearer {_bearer(cfg)}"} if cfg["api_key"] else {}
     req = urllib.request.Request(cfg["base_url"].rstrip("/") + "/models", headers=headers)
     try:

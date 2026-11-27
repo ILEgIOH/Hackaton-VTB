@@ -1,13 +1,21 @@
-"""Простое JSON-хранилище с блокировкой (достаточно для настольного приложения)."""
+"""JSON-хранилище состояния с блокировкой + журнал аудита и история телеметрии в SQLite (journal.py).
+
+Запись состояния может быть отложенной (write_delay > 0): частые пакеты агентов меняют данные в памяти, а на диск
+состояние сбрасывается не чаще раза в write_delay секунд и при остановке. Это снимает узкое место «запись файла на
+каждый пакет» и поднимает пропускную способность приёма телеметрии.
+"""
 from __future__ import annotations
 
 import hashlib
 import json
 import os
 import secrets
+import atexit
 import threading
 import time
 from pathlib import Path
+
+from .journal import Journal
 
 DATA_DIR = Path(os.environ.get("CC_DATA_DIR", Path(__file__).resolve().parent.parent / "data"))
 
@@ -24,8 +32,15 @@ def check_password(password: str, stored: str) -> bool:
 
 
 class Store:
-    def __init__(self, path: Path | None = None):
+    def __init__(self, path: Path | None = None, write_delay: float = 0.0, journal: Journal | None = None):
         self.path = Path(path) if path else DATA_DIR / "db.json"
+        self.journal = journal or Journal(":memory:")
+        self.write_delay = write_delay
+        self._dirty = threading.Event()
+        self.writes = 0
+        if write_delay > 0:
+            threading.Thread(target=self._flusher, daemon=True, name="cc-flush").start()
+            atexit.register(self.flush)
         self.lock = threading.RLock()
         self.db: dict = {}
         self.sessions: dict[str, dict] = {}
@@ -39,7 +54,28 @@ class Store:
         return False
 
     def save(self):
+        if self.write_delay > 0:
+            self._dirty.set()          # запишет фоновый поток
+            return
+        self._write()
+
+    def flush(self):
+        if self._dirty.is_set():
+            self._dirty.clear()
+            self._write()
+
+    def _flusher(self):
+        while True:
+            self._dirty.wait()
+            time.sleep(self.write_delay)
+            try:
+                self.flush()
+            except Exception as e:  # noqa
+                print("store flush error:", e)
+
+    def _write(self):
         with self.lock:
+            self.writes += 1
             self.path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.path.with_suffix(".tmp")
             tmp.write_text(json.dumps(self.db, ensure_ascii=False, indent=1), "utf-8")

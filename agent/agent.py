@@ -4,10 +4,14 @@
     python agent.py --server http://bank-host:8765 --key CC-7F2K-91QX --name srv-01
     python agent.py ... --mock          # без GPU: синтетические данные для проверки
 
-Использует только стандартную библиотеку. Данные: серийный номер, температура, загрузка, наработка.
+Использует только стандартную библиотеку. Каждый пакет подписан HMAC-SHA256 (защита от подделки и повтора).
+Для промышленного контура адрес банка указывается как https://… (TLS на балансировщике банка).
+ Данные: серийный номер, температура, загрузка, наработка.
 Наработка (nvidia-smi её не отдаёт) накапливается агентом в локальном файле счётчика.
 """
 import argparse
+import hashlib
+import hmac
 import json
 import random
 import shutil
@@ -63,8 +67,12 @@ def main():
         counter.write_text(str(hours))
         for g in gpus:
             g["hours"] = round(hours)
-        body = json.dumps(dict(key=a.key, server=a.name, gpus=gpus)).encode()
-        req = urllib.request.Request(a.server.rstrip("/") + "/api/agent/ingest", data=body, headers={"Content-Type": "application/json"})
+        # пакет подписывается HMAC-SHA256 ключом подключения; сам ключ по сети не передаётся (только его идентификатор)
+        body = json.dumps(dict(server=a.name, gpus=gpus)).encode()
+        ts = str(int(time.time()))
+        headers = {"Content-Type": "application/json", "X-CC-Key-Id": hashlib.sha256(a.key.encode()).hexdigest()[:16], "X-CC-Timestamp": ts,
+                   "X-CC-Signature": hmac.new(a.key.encode(), ts.encode() + b"." + body, hashlib.sha256).hexdigest()}
+        req = urllib.request.Request(a.server.rstrip("/") + "/api/agent/ingest", data=body, headers=headers)
         try:
             with urllib.request.urlopen(req, timeout=20) as r:
                 print(time.strftime("%H:%M:%S"), "отправлено", len(gpus), "карт, ответ", r.status)

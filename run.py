@@ -1,5 +1,6 @@
 """Запуск ComputeCollateral: python run.py [--port 8765] [--browser] [--reset]"""
 import argparse
+import os
 import sys
 import threading
 import webbrowser
@@ -37,7 +38,9 @@ def main():
     if cloud:
         a.no_window = True
 
-    store = Store()
+    from compute_collateral.journal import Journal
+    from compute_collateral.store import DATA_DIR
+    store = Store(write_delay=0.5, journal=Journal(DATA_DIR / "journal.sqlite"))
     if a.reset or not store.load():
         seed.seed(store)
     with store.lock:
@@ -46,6 +49,7 @@ def main():
     store.save()
 
     srv = create_server(store, a.host, a.port)
+    srv.app.journal.audit("Система", "startup", details={"адрес": f"{a.host}:{a.port}", "контур": "закрытый" if os.environ.get("CC_ONPREM") == "1" else "демо"})
     monitor.Monitor(store, app=srv.app).start()
     url = f"http://{a.host}:{a.port}/"
     print(f"ComputeCollateral: {url}  (вход: e.sokolova@bank.ru / Compute2026; роли: a.kim@ / m.orlova@ / leasing@bank.ru)")

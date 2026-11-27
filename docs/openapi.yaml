@@ -1,0 +1,118 @@
+openapi: 3.0.3
+info:
+  title: ComputeCollateral API
+  version: "0.2"
+  description: |
+    API для интеграции с системами банка: кредитным конвейером, SIEM, мониторингом и агентами на серверах заёмщика.
+    Пользовательские запросы аутентифицируются cookie `cc_session` (вход через `/api/login`; в пилоте — SSO банка).
+    Права проверяются на сервере по ролям: analyst, risk, collateral, leasing.
+servers:
+  - url: https://collateral.bank.local
+paths:
+  /api/agent/ingest:
+    post:
+      summary: Пакет телеметрии от агента (серийные номера, температура, загрузка, наработка)
+      security: []
+      parameters:
+        - {in: header, name: X-CC-Key-Id, required: true, schema: {type: string}, description: "sha256(ключ агента)[:16]"}
+        - {in: header, name: X-CC-Timestamp, required: true, schema: {type: string}, description: "unix-время; окно ±300 с"}
+        - {in: header, name: X-CC-Signature, required: true, schema: {type: string}, description: "hex(HMAC-SHA256(ключ, timestamp + '.' + тело))"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [server, gpus]
+              properties:
+                server: {type: string, example: srv-01}
+                gpus:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      index: {type: integer}
+                      serial: {type: string, example: "1654023118421"}
+                      temperature: {type: number}
+                      utilization: {type: number}
+                      hours: {type: number}
+      responses:
+        "200": {description: Принято}
+        "401": {description: Неверная подпись, устаревший пакет или повтор}
+        "404": {description: Сервер не входит в перечень залога}
+  /api/deals/{id}:
+    get:
+      summary: Сделка — оценка, прогноз, LTV, состояние оборудования
+      parameters: [{in: path, name: id, required: true, schema: {type: string}}]
+      responses: {"200": {description: Карточка сделки}, "403": {description: Нет прав}}
+  /api/deals/{id}/whatif:
+    post:
+      summary: Расчёт «что если» для кредитного конвейера — безопасная сумма и LTV при заданных условиях
+      parameters: [{in: path, name: id, required: true, schema: {type: string}}]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amount: {type: number, example: 60000000}
+                term: {type: integer, example: 36}
+                rate: {type: number, example: 18}
+                scenario: {type: string, enum: [opt, base, pess]}
+                basis: {type: string, enum: [market, liquidation]}
+      responses: {"200": {description: "recommendation: max_loan, ltv, exceeds; прогноз покрытия"}, "422": {description: Ошибки полей}}
+  /api/deals/{id}/reassess:
+    post:
+      summary: Переоценка по свежим ценам и данным агента (прежняя оценка сохраняется в документах)
+      parameters: [{in: path, name: id, required: true, schema: {type: string}}]
+      responses: {"200": {description: "Было → стало"}}
+  /api/deals/{id}/export:
+    post:
+      summary: Заключение для кредитного комитета (PDF/Word)
+      parameters: [{in: path, name: id, required: true, schema: {type: string}}]
+      requestBody:
+        content:
+          application/json:
+            schema: {type: object, properties: {format: {type: string, enum: [pdf, docx]}, sections: {type: array, items: {type: string}}}}
+      responses: {"200": {description: Ссылка на документ}}
+  /api/deals/{id}/telemetry-history:
+    get:
+      summary: История показаний агента
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string}}
+        - {in: query, name: server, schema: {type: string}}
+        - {in: query, name: gpu, schema: {type: integer}}
+        - {in: query, name: limit, schema: {type: integer, default: 500}}
+      responses: {"200": {description: "Массив {ts, server, gpu, serial, temp, util, hours}"}}
+  /api/check-inn:
+    get:
+      summary: Проверка ИНН — контрольная сумма, дубль в портфеле, перечень 115-ФЗ
+      parameters: [{in: query, name: inn, required: true, schema: {type: string}}]
+      responses: {"200": {description: "{valid, existing, aml?: {hit, reason}}"}}
+  /api/notifications:
+    get:
+      summary: Уведомления по ролям (подмена, связь, ковенант, прогноз)
+      responses: {"200": {description: Список}}
+  /api/audit:
+    get:
+      summary: Журнал аудита (роли risk, collateral) — для выгрузки в SIEM
+      parameters: [{in: query, name: limit, schema: {type: integer, default: 200}}, {in: query, name: object, schema: {type: string}}]
+      responses: {"200": {description: "{items: [{id, ts, actor, role, action, object, ip, result, details, hash}], total}"}}
+  /api/audit/verify:
+    post:
+      summary: Проверка целостности цепочки хэшей журнала
+      responses: {"200": {description: "{ok, checked, broken_at}"}}
+  /api/security:
+    get:
+      summary: Состояние защиты (контур, ИИ, подпись агентов, стоп-лист, сроки хранения)
+      responses: {"200": {description: Сводка}}
+  /api/health:
+    get:
+      summary: Проверка живости для оркестратора
+      security: []
+      responses: {"200": {description: "{ok, version, uptime_s, deals, onprem}"}}
+  /api/metrics:
+    get:
+      summary: Метрики Prometheus (без персональных данных)
+      security: []
+      responses: {"200": {description: text/plain}}

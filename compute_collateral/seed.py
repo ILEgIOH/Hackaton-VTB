@@ -140,4 +140,17 @@ def seed(store):
       decision=dict(text="Назначена переоценка, " + (today).strftime("%d.%m.%Y"), by="А. Ким", ts=now - 90 * 3600, action="reassess", payload={}))
     n("neuroset", "forecast", "Через 9 месяцев залог может стать дешевле долга", "В пессимистичном сценарии разрыв продлится 20 мес.", "medium", "Аналитик", "Е. Соколова",
       "watching", 120, "Снизить сумму или сократить срок", decision=dict(text="Оставлено на наблюдении", by="Е. Соколова", ts=now - 100 * 3600, action="watch", payload={}), wake_days=20)
+    seed_stoplist()
     return db
+
+
+DEMO_STOP_INN = make_inn("772900115")
+
+
+def seed_stoplist():
+    """Демо-перечень 115-ФЗ: одна тестовая запись, чтобы показать остановку сделки. Реальный перечень загружает банк."""
+    from . import security
+    p = security.stoplist_path()
+    if not p.exists():
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(f"ИНН;Основание\n{DEMO_STOP_INN};ДЕМО: тестовая запись перечня, не реальная организация\n", "utf-8")

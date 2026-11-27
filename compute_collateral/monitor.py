@@ -1,6 +1,7 @@
 """Фоновый мониторинг: симуляция телеметрии демо-агентов, правила уведомлений, периодический ИИ-анализ."""
 from __future__ import annotations
 
+import os
 import random
 import threading
 import time
@@ -29,6 +30,7 @@ class Monitor(threading.Thread):
         super().__init__(daemon=True, name="cc-monitor")
         self.store, self.tick, self.rng, self.app = store, tick, random.Random(), app
         self.stop_event = threading.Event()
+        self.recorded: dict[str, float] = {}
 
     def run(self):
         while not self.stop_event.wait(self.tick):
@@ -47,12 +49,21 @@ class Monitor(threading.Thread):
             if self.app:
                 self.app.ensure_market_fresh()
                 self.app.finalize_calcs(now)
+                self.app.auto_revalue(now)          # 590-П: плановая переоценка устаревших оценок
+                if now - getattr(self, "_purged", 0) > 86400:   # срок хранения телеметрии
+                    self._purged = now
+                    self.app.journal.purge_telemetry(float(os.environ.get("CC_TELEMETRY_DAYS", "400")), now)
             for deal in db["deals"].values():
                 if deal.get("status") != "active":
                     continue
                 if db["settings"].get("simulate", True) and deal.get("simulated"):
                     drift(deal, self.rng, now, self.tick)
                     changed = True
+                    last = self.recorded.get(deal["id"], 0)
+                    if self.app and now - last >= 300:       # демо-агенты пишут историю раз в 5 минут, как реальный агент по ТЗ
+                        self.recorded[deal["id"]] = now
+                        self.app.journal.add_telemetry([(now, deal["id"], s["name"], g["idx"], g.get("actual_serial"), g.get("temp"), g.get("util"), g.get("hours"))
+                                                        for s in deal["servers"] if not s.get("frozen") for g in s["gpus"] if g.get("temp") is not None])
                 if alerts.sync(db, deal, now):
                     changed = True
                 if ai.ai_ready(cfg):

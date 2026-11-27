@@ -43,12 +43,13 @@ function wizStep1() {
   fm.addEventListener("input", e => { w.form[e.target.name] = e.target.value; lsSet(formKey(), JSON.stringify(w.form)); if (e.target.name === "inn") dupCheck(); });
   fm.addEventListener("focusout", e => { if (e.target.name) show(check(), e.target.name); });
   async function dupCheck() {
-    const inn = w.form.inn.trim(); w.dup = null; w.force = false; drawDup();
+    const inn = w.form.inn.trim(); w.dup = null; w.aml = null; w.force = false; drawDup();
     if (!/^(\d{10}|\d{12})$/.test(inn) || !innOk(inn)) return;
-    try { const r = await api("/check-inn?inn=" + inn); if (w.form.inn.trim() === inn) { w.dup = r.existing; drawDup(); } } catch { }
+    try { const r = await api("/check-inn?inn=" + inn); if (w.form.inn.trim() === inn) { w.dup = r.existing; w.aml = r.aml || null; drawDup(); } } catch { }
   }
   function drawDup() {
     const d = $("#dup"), nx = $("#next"); if (!d) return;
+    if (w.aml) { d.innerHTML = `<div class="info bad" style="margin:0"><b>ИНН найден во внутреннем перечне банка (115-ФЗ)</b><br>${esc(w.aml.reason)}. Сделку нельзя продолжить до проверки службой комплаенса. Событие записано в журнал аудита.</div>`; nx.disabled = true; return; }
     if (w.dup && !w.force) { d.innerHTML = `<div class="banner-amber"><div><b>Компания с этим ИНН уже есть в портфеле</b>${esc(w.dup.borrower)}, сделка ${esc(w.dup.contract || "")}${w.dup.assessed ? ", оценка от " + w.dup.assessed : ""}</div><div class="row"><button class="btn sm" id="open">Открыть компанию</button><button class="btn sm primary" id="newdeal">Новая сделка для неё</button></div></div>`; nx.disabled = true;
       $("#open").onclick = async () => { if (w.draft) await api(`/deals/${w.draft.id}/discard`, { body: {} }).catch(() => { }); WIZ = null; location.hash = "#/deal/" + w.dup.id; };
       $("#newdeal").onclick = () => { w.force = true; drawDup(); }; }

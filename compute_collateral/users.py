@@ -18,6 +18,7 @@ PERMS = {
     "upload_docs": {"analyst", "collateral"},
     "decide_equipment": {"collateral"},          # подмена, связь с сервером
     "decide_covenant": {"risk", "collateral"},   # нарушение ковенанта
+    "audit_view": {"risk", "collateral"},          # журнал аудита и состояние защиты
     "decide_forecast": {"analyst", "risk"},      # прогноз, близко к порогу
     "write_cod": {"analyst", "collateral"},
     "edit_thresholds": {"risk"},

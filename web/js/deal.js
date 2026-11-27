@@ -249,12 +249,14 @@ function uploadModal(D, done) {
 /* ---- ИИ-наблюдатель ---- */
 function aiTab(D) {
   const el = $("#dt"), id = D.id, RISK = { low: "Низкий риск", medium: "Средний риск", high: "Высокий риск" };
+  const find = x => `<div class="find"><span class="sv ${x.severity}"></span><div><b>${esc(x.title)}${x.server ? ` — ${esc(x.server)}${x.gpu != null ? ", GPU " + x.gpu : ""}` : ""}</b><span>${esc(x.detail || "")}</span></div></div>`;
   const draw = r => {
     el.innerHTML = `<div class="two"><div class="card"><div class="row-between"><h2>Анализ ИИ-наблюдателя</h2><button class="btn primary sm" id="run">Запустить анализ</button></div>
-      <p class="muted" style="font-size:13px;margin:-8px 0 14px">Справочная подсказка. На стоимость залога, статусы и решения по сделке не влияет: решения принимает сотрудник банка.</p>
+      <p class="muted" style="font-size:13px;margin:-8px 0 14px">Справочная подсказка. На стоимость залога, статусы и решения по сделке не влияет: решения принимает сотрудник банка. Название, ИНН, договор, контакты заёмщика и серийные номера перед отправкой в нейросеть заменяются метками.</p>
       ${r ? `<div class="row" style="margin-bottom:12px"><span class="pill ${r.risk}">${RISK[r.risk]}</span><span class="muted" style="font-size:14px">${r.source === "ai" ? "модель " + esc(r.model) : "правила (ИИ не подключён)"} · ${fdt(r.ts)}</span></div><p style="margin:0 0 14px;font-size:17px">${esc(r.summary)}</p>
       ${r.ai_error ? `<div class="info warn" style="padding:12px 16px;font-size:14px">ИИ недоступен: ${esc(r.ai_error)}. Показаны результаты правил.</div>` : ""}
-      ${r.findings.map(x => `<div class="find"><span class="sv ${x.severity}"></span><div><b>${esc(x.title)}${x.server ? ` — ${esc(x.server)}${x.gpu != null ? ", GPU " + x.gpu : ""}` : ""}</b><span>${esc(x.detail || "")}</span></div></div>`).join("") || '<p class="muted">Замечаний нет.</p>'}
+      ${r.findings.map(find).join("") || '<p class="muted">Замечаний нет.</p>'}
+      ${r.ai_findings?.length ? `<h2 style="font-size:17px;margin:20px 0 6px">Дополнительно от ИИ</h2><p class="muted" style="font-size:13px;margin:0 0 10px">Замечания модели сверх правил. Замечания правил выше показываются всегда, ответ модели их не убирает и риск не снижает.</p>${r.ai_findings.map(find).join("")}` : ""}
       ${r.recommendations?.length ? `<h2 style="font-size:17px;margin:20px 0 6px">Рекомендации</h2><ul style="margin:0;padding-left:20px">${r.recommendations.map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}` : `<p class="muted">Анализ ещё не запускался.</p>`}
       ${D.ai_ready ? "" : `<div class="info warn" style="margin:20px 0 0;padding:14px 18px;font-size:14px">Подключите модель в <a href="#/settings">настройках</a> — она будет разбирать телеметрию вместе с правилами.</div>`}</div>
      <div class="card" style="padding:34px"><h2>Спросить ИИ о сделке</h2><div class="chat"><div class="msgs" id="msgs"><div class="msg a">Задайте вопрос по залогу: например, «какие серверы вызывают опасения?» или «что будет с покрытием через год?»</div></div>
@@ -263,7 +265,7 @@ function aiTab(D) {
       <div class="row">${[["overheat", "Перегрев"], ["swap", "Подмена карты"], ["offline", "Обрыв связи"], ["reset", "Сбросить"]].map(([k, t]) => `<button class="btn sm" data-inc="${k}">${t}</button>`).join("")}</div>` : ""}</div></div>`;
     $("#run").onclick = async e => { e.target.disabled = true; e.target.textContent = "Анализируем…"; try { draw(await api(`/deals/${id}/ai-analyze`, { body: {} })); } catch (er) { toast(er.message, true); e.target.disabled = false; e.target.textContent = "Запустить анализ"; } };
     const msgs = $("#msgs"), say = (c, t) => { const d = document.createElement("div"); d.className = "msg " + c; d.textContent = t; msgs.appendChild(d); msgs.scrollTop = msgs.scrollHeight; return d; };
-    const ask = async () => { const q = $("#qq").value.trim(); if (!q) return; $("#qq").value = ""; say("u", q); const w = say("a", "…"); try { w.textContent = (await api(`/deals/${id}/ai-chat`, { body: { question: q } })).answer; } catch (e) { w.textContent = e.message; } };
+    const ask = async () => { const q = $("#qq").value.trim(); if (!q) return; $("#qq").value = ""; say("u", q); const w = say("a", "…"); try { const r = await api(`/deals/${id}/ai-chat`, { body: { question: q } }); w.textContent = r.answer; const mk = Object.entries(r.masked || {}); if (mk.length) { const n = document.createElement("small"); n.className = "muted"; n.style.cssText = "display:block;margin-top:6px;font-size:12px"; n.textContent = "Перед отправкой в нейросеть скрыто: " + mk.map(([k, v]) => ({ email: "почта", phone: "телефон", card: "номер карты", snils: "СНИЛС", passport: "паспорт", account: "счёт", inn: "ИНН" }[k] || k) + " — " + v).join(", "); w.appendChild(n); } } catch (e) { w.textContent = e.message; } };
     $("#ask").onclick = ask; $("#qq").onkeydown = e => e.key === "Enter" && ask();
     $$("[data-inc]").forEach(b => b.onclick = async () => { try { await api(`/deals/${id}/incident`, { body: { type: b.dataset.inc } }); toast("Готово — смотрите «Уведомления» и запустите анализ"); } catch (e) { toast(e.message, true); } });
   };

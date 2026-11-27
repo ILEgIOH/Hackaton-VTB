@@ -13,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from . import ai, alerts, docs, engine, mailer, market, parsers, report, users
+from . import __version__, ai, alerts, docs, engine, mailer, market, parsers, report, security, users
 from .market import MODELS
 from .store import DATA_DIR, Store, check_password, hash_password
 
@@ -27,6 +27,9 @@ CALC_STEP_SEC = 0.9
 CALC_STEPS = ["Сверяем серийные номера с перечнем", "Обрабатываем данные {cards} карт", "Собираем цены дилеров и ставки аренды",
               "Считаем три метода оценки", "Строим прогноз и подбираем LTV"]
 LOAN_LIMITS = dict(amount=(1e6, 5e8), term=(6, 60), rate=(1, 40), covenant=(1.0, 2.0))
+NOT_AUDITED = {"ingest", "calc_status", "whatif", "set_step", "parse_eq", "template", "template_x"}  # частые/служебные вызовы
+CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
+       "font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
 
 
 class ApiError(Exception):
@@ -80,6 +83,9 @@ def validate_loan(b: dict, today: date | None = None, need_date=True) -> dict:
 class App:
     def __init__(self, store: Store):
         self.store = store
+        self.journal = store.journal
+        self.started = time.time()
+        self.metrics = dict(requests=0, errors=0, ingest=0, ingest_rejected=0, req_seconds=0.0, auto_revalue=0)
         self.routes = []
         self.bootstrap()
         self._register()
@@ -187,7 +193,7 @@ class App:
             notify=[dict(kind=k, label=l, to=to, **users.notify_pref(user, k)) for k, l, to in users.NOTIFY_TYPES],
             ai=dict(enabled=bool(s["ai"].get("enabled")), base_url=c["base_url"], model=c["model"], interval_min=c.get("interval_min", 30),
                     has_key=bool(c["api_key"]), key_from_env=bool(__import__("os").environ.get("CC_AI_API_KEY")), can_edit=users.can(user, "ai_settings")),
-            simulate=s.get("simulate", True))
+            simulate=s.get("simulate", True), onprem=security.onprem(), deidentify=security.deidentify_enabled())
 
     @staticmethod
     def public_demo_guard():
@@ -305,6 +311,10 @@ class App:
             inn = (ctx.query.get("inn", [""])[0] or "").strip()
             if not parsers.inn_valid(inn):
                 return dict(valid=False, existing=None)
+            aml = security.aml_check(inn)
+            if aml:
+                ctx.audit_action, ctx.audit_result, ctx.audit_details = "aml_block", "blocked", {"ИНН": inn, "основание": aml["reason"]}
+                return dict(valid=True, existing=None, aml=aml)
             ex = next((d for d in self.db["deals"].values() if d.get("inn") == inn and d["status"] in ("active", "calculating")), None)
             asm = ex.get("assessments", []) if ex else []
             return dict(valid=True, existing=dict(id=ex["id"], borrower=ex["borrower"], contract=ex.get("contract"),
@@ -412,6 +422,12 @@ class App:
                     raise ApiError("Неизвестная модель оборудования", 422)
                 s["last_seen"] = None
             inn = str(b["inn"]).strip()
+            aml = security.aml_check(inn)
+            if aml:
+                ctx.audit_action, ctx.audit_result = "aml_block", "blocked"
+                ctx.audit_details = {"ИНН": inn, "основание": aml["reason"]}
+                raise ApiError(f"ИНН найден во внутреннем перечне банка (115-ФЗ): {aml['reason']}. Передайте сделку в службу комплаенса",
+                               422, fields=dict(inn="ИНН в перечне 115-ФЗ — нужна проверка комплаенса"), code="aml")
             ex = next((d for d in self.db["deals"].values() if d.get("inn") == inn and d["status"] in ("active", "calculating")), None)
             if ex and not b.get("force"):
                 raise ApiError("Компания с этим ИНН уже есть в портфеле", 409, existing=dict(id=ex["id"], borrower=ex["borrower"], contract=ex.get("contract")))
@@ -739,6 +755,8 @@ class App:
         def ai_analyze(ctx, id):
             deal = self.deal(id, allow_draft=False)
             rep = ai.analyze(deal, engine.deal_detail(deal, time.time()), self.cfg())
+            if rep.get("masked"):
+                ctx.audit_details = {"замаскировано": ", ".join(f"{k}: {v}" for k, v in rep["masked"].items())}
             self.db["ai_reports"][id] = rep
             st.save()
             return rep
@@ -750,7 +768,10 @@ class App:
             if not q:
                 raise ApiError("Введите вопрос")
             try:
-                return dict(answer=ai.ask(deal, engine.deal_detail(deal, time.time()), self.cfg(), q))
+                answer, masked = ai.ask_ex(deal, engine.deal_detail(deal, time.time()), self.cfg(), q)
+                if masked:
+                    ctx.audit_details = {"замаскировано": ", ".join(f"{k}: {v}" for k, v in masked.items())}
+                return dict(answer=answer, masked=masked)
             except Exception as e:
                 raise ApiError(str(e), 502)
 
@@ -786,14 +807,29 @@ class App:
         @r("POST", "/api/agent/ingest", public=True)
         def ingest(ctx):
             b = ctx.json()
-            key = str(b.get("key") or b.get("token") or "")
-            deal = next((d for d in self.db["deals"].values() if secrets.compare_digest(d["agent_token"], key) or secrets.compare_digest(d.get("agent_key", ""), key)), None)
-            if not deal:
-                raise ApiError("Неверный ключ агента", 401)
+            sig, kid = ctx.headers.get("X-CC-Signature"), ctx.headers.get("X-CC-Key-Id")
+            if sig or kid:   # подписанный пакет: ключ по сети не передаётся, только его идентификатор и HMAC тела
+                deal = next((d for d in self.db["deals"].values() if d.get("agent_key") and security.key_id(d["agent_key"]) == kid), None)
+                why = "неизвестный ключ" if not deal else security.verify_signature(deal["agent_key"], ctx.headers.get("X-CC-Timestamp"), sig, ctx.body())
+                if why:
+                    self.metrics["ingest_rejected"] += 1
+                    self.journal.audit("агент", "agent_rejected", deal["id"] if deal else "", ip=ctx.ip, result="rejected",
+                                       details=dict(reason=why, server=str(b.get("server", ""))[:40]))
+                    raise ApiError(f"Пакет агента отклонён: {why}", 401)
+            else:
+                if security.signed_only():
+                    self.metrics["ingest_rejected"] += 1
+                    self.journal.audit("агент", "agent_rejected", ip=ctx.ip, result="rejected", details=dict(reason="пакет без подписи"))
+                    raise ApiError("Пакет агента отклонён: требуется подпись (обновите агент)", 401)
+                key = str(b.get("key") or b.get("token") or "")
+                deal = next((d for d in self.db["deals"].values() if secrets.compare_digest(d["agent_token"], key) or secrets.compare_digest(d.get("agent_key", ""), key)), None)
+                if not deal:
+                    raise ApiError("Неверный ключ агента", 401)
             srv = next((s for s in deal["servers"] if s["name"] == b.get("server")), None)
             if not srv:
                 raise ApiError(f"Сервер {b.get('server')} не входит в перечень оборудования", 404)
             now = time.time()
+            hist = []
             for rep in b.get("gpus", []):
                 idx = rep.get("index")
                 g = next((x for x in srv["gpus"] if x["idx"] == idx), None)
@@ -805,6 +841,9 @@ class App:
                 g.update(actual_serial=str(rep.get("serial", "")) or None, temp=rep.get("temperature"), util=rep.get("utilization"))
                 if hours is not None:
                     g["hours"] = hours
+                hist.append((now, deal["id"], srv["name"], idx, g.get("actual_serial"), g.get("temp"), g.get("util"), g.get("hours")))
+            self.journal.add_telemetry(hist)
+            self.metrics["ingest"] += 1
             srv["last_seen"] = now
             srv.pop("frozen", None)
             if deal["telemetry_mode"] != "agent":
@@ -813,6 +852,95 @@ class App:
                 alerts.sync(self.db, deal, now)
             st.save()
             return dict(ok=True)
+
+        # --- безопасность, аудит, эксплуатация ---
+        @r("GET", "/api/health", public=True)
+        def health(ctx):
+            return dict(ok=True, version=__version__, uptime_s=round(time.time() - self.started), deals=len(self.db["deals"]),
+                        onprem=security.onprem())
+
+        @r("GET", "/api/metrics", public=True)
+        def metrics_route(ctx):
+            """Метрики в формате Prometheus — для мониторинга сервиса в контуре банка (без персональных данных)."""
+            m = self.metrics
+            active = sum(d["status"] == "active" for d in self.db["deals"].values())
+            open_n = sum(n.get("status") in ("new", "in_work") for n in self.db.get("notifications", []))
+            lines = [
+                "# TYPE cc_requests_total counter", f"cc_requests_total {m['requests']}",
+                "# TYPE cc_errors_total counter", f"cc_errors_total {m['errors']}",
+                "# TYPE cc_request_seconds_sum counter", f"cc_request_seconds_sum {m['req_seconds']:.4f}",
+                "# TYPE cc_ingest_total counter", f"cc_ingest_total {m['ingest']}",
+                "# TYPE cc_ingest_rejected_total counter", f"cc_ingest_rejected_total {m['ingest_rejected']}",
+                "# TYPE cc_auto_revalue_total counter", f"cc_auto_revalue_total {m['auto_revalue']}",
+                "# TYPE cc_deals_active gauge", f"cc_deals_active {active}",
+                "# TYPE cc_notifications_open gauge", f"cc_notifications_open {open_n}",
+                "# TYPE cc_store_writes_total counter", f"cc_store_writes_total {self.store.writes}",
+                "# TYPE cc_audit_records gauge", f"cc_audit_records {self.journal.audit_count()}",
+                "# TYPE cc_telemetry_rows gauge", f"cc_telemetry_rows {self.journal.telemetry_count()}",
+                "# TYPE cc_uptime_seconds gauge", f"cc_uptime_seconds {time.time() - self.started:.0f}",
+            ]
+            return ctx.raw(("\n".join(lines) + "\n").encode(), "text/plain; version=0.0.4; charset=utf-8")
+
+        @r("GET", "/api/security", perm="view")
+        def security_get(ctx):
+            c = self.cfg()
+            ai_host = urlparse(c["base_url"]).hostname or "stub"
+            return dict(
+                onprem=security.onprem(), signed_only=security.signed_only(), deidentify=security.deidentify_enabled(),
+                ai=dict(base_url=c["base_url"], internal=ai.is_stub(c) or security.host_internal(ai_host),
+                        russian=any(h in c["base_url"] for h in ("sberbank", "giga.chat")) or ai.is_stub(c)),
+                stoplist=dict(loaded=len(security.stoplist()), path=str(security.stoplist_path().name)),
+                session_min=round(st.session_ttl / 60), lock=dict(fails=MAX_FAILS, minutes=LOCK_MINUTES),
+                audit=dict(records=self.journal.audit_count(), can_view=users.can(ctx.user, "audit_view")),
+                telemetry=dict(rows=self.journal.telemetry_count(), retention_days=float(__import__("os").environ.get("CC_TELEMETRY_DAYS", "400"))),
+                revalue_days=self.db["settings"].get("revalue_days", 90))
+
+        @r("GET", "/api/audit", perm="audit_view")
+        def audit_list(ctx):
+            q = ctx.query
+            return dict(items=self.journal.audit_list(int((q.get("limit") or ["200"])[0]), (q.get("object") or [None])[0]),
+                        total=self.journal.audit_count())
+
+        @r("POST", "/api/audit/verify", perm="audit_view")
+        def audit_verify(ctx):
+            return self.journal.verify()
+
+        @r("GET", r"/api/deals/(?P<id>[\w-]+)/telemetry-history", perm="view")
+        def telemetry_history(ctx, id):
+            self.deal(id, allow_draft=False)
+            q = ctx.query
+            srv = (q.get("server") or [None])[0]
+            gpu = (q.get("gpu") or [None])[0]
+            return self.journal.telemetry_history(id, srv, int(gpu) if gpu not in (None, "") else None,
+                                                  limit=int((q.get("limit") or ["500"])[0]))
+
+    # ----- плановая переоценка (590-П: не реже раза в квартал) -----
+    def auto_revalue(self, now=None) -> list[str]:
+        """Сделки, оценка которых старше settings.revalue_days (по умолчанию 90 дней), переоцениваются автоматически:
+        прежняя оценка уходит в «Документы», автору приходит уведомление, действие пишется в журнал аудита."""
+        now = now or time.time()
+        days = float(self.db["settings"].get("revalue_days", 90))
+        done = []
+        for d in self.db["deals"].values():
+            asm = d.get("assessments") or []
+            if d.get("status") != "active" or not asm or now - asm[-1]["ts"] < days * 86400:
+                continue
+            prev = asm[-1]
+            self.save_snapshot_doc(d, prev, "Система")
+            snap = self.snapshot(d, "Система (плановая переоценка)", now)
+            asm.append(snap)
+            delta = snap["market"] / prev["market"] - 1 if prev["market"] else 0
+            alerts.add(self.db, d, "ready", f"Плановая переоценка: {d['borrower']}",
+                       f"Рыночная стоимость {fmt_rub(snap['market'])} ({delta:+.1%} к оценке от {ts_to_date(prev['ts'])})", "low", now,
+                       "Открыть компанию", author=d.get("author"))
+            alerts.sync(self.db, d, now)
+            self.journal.audit("Система", "auto_revalue", d["id"], role="scheduler",
+                               details=dict(prev=round(prev["market"]), now=round(snap["market"]), days=days))
+            self.metrics["auto_revalue"] += 1
+            done.append(d["id"])
+        if done:
+            self.store.save()
+        return done
 
     # ----- вспомогательные -----
     def render_conclusion(self, deal, user, fmt, sections=None):
@@ -864,6 +992,8 @@ class Ctx:
         self.token = c["cc_session"].value if "cc_session" in c else None
         self.user, self.expired = None, False
         self._body = None
+        self.ip = h.headers.get("X-Real-IP") or h.client_address[0]
+        self.audit_action = self.audit_result = self.audit_details = None
 
     def body(self) -> bytes:
         if self._body is None:
@@ -903,6 +1033,9 @@ def make_handler(app: App):
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("Content-Security-Policy", CSP)
             for k, v in (extra or []):
                 self.send_header(k, v)
             self.end_headers()
@@ -925,14 +1058,19 @@ def make_handler(app: App):
                     return self._send(405, b"", "text/plain")
                 return self._static(url.path)
             ctx = Ctx(self, parse_qs(url.query))
+            t0, fn_name, status = time.time(), None, 200
             try:
                 if method == "POST":
                     ctx.body()  # всегда вычитываем тело, иначе ломается keep-alive
+                    origin = self.headers.get("Origin")
+                    if origin and urlparse(origin).netloc != self.headers.get("Host"):
+                        raise ApiError("Запрос с чужого сайта отклонён", 403, code="csrf")
                 with app.store.lock:
                     ctx.user, ctx.expired = app.store.user_for(ctx.token)
                     for m, rx, fn, public, perm in app.routes:
                         mt = rx.match(url.path)
                         if m == method and mt:
+                            fn_name = fn.__name__
                             if not public and not ctx.user:
                                 raise ApiError("Сессия завершена" if ctx.expired else "Требуется вход", 401, code="session_expired" if ctx.expired else "auth")
                             if perm and not users.can(ctx.user, perm):
@@ -943,7 +1081,8 @@ def make_handler(app: App):
                         raise ApiError("Не найдено", 404)
                 extra = []
                 if ctx.set_cookie:
-                    extra.append(("Set-Cookie", f"cc_session={ctx.set_cookie}; Path=/; HttpOnly; SameSite=Strict"))
+                    secure = "; Secure" if __import__("os").environ.get("CC_HTTPS") == "1" else ""
+                    extra.append(("Set-Cookie", f"cc_session={ctx.set_cookie}; Path=/; HttpOnly; SameSite=Strict{secure}"))
                 if ctx.clear_cookie:
                     extra.append(("Set-Cookie", "cc_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict"))
                 if isinstance(res, RawResponse):
@@ -953,11 +1092,50 @@ def make_handler(app: App):
                     return self._send(200, res.data, res.ctype, extra)
                 self._send(200, json.dumps(res, ensure_ascii=False).encode(), "application/json; charset=utf-8", extra)
             except ApiError as e:
+                status = e.code
                 self._send(e.code, json.dumps(dict(error=str(e), **e.extra), ensure_ascii=False).encode(), "application/json; charset=utf-8")
             except Exception as e:  # noqa
                 import traceback
                 traceback.print_exc()
+                status = 500
                 self._send(500, json.dumps(dict(error="Внутренняя ошибка: " + str(e)), ensure_ascii=False).encode(), "application/json; charset=utf-8")
+            finally:
+                app.metrics["requests"] += 1
+                app.metrics["errors"] += status >= 500
+                app.metrics["req_seconds"] += time.time() - t0
+                self._audit(method, url.path, ctx, fn_name, status)
+
+        def _audit(self, method, path, ctx, fn_name, status):
+            """Каждое изменяющее действие, вход и отказ в доступе попадают в журнал аудита."""
+            action = ctx.audit_action or fn_name
+            if not action or (method != "POST" and status != 403 and action not in ("doc_download", "audit_list", "aml_block")):
+                return
+            if action in NOT_AUDITED and status < 400:
+                return
+            if action == "ingest":
+                return              # отказы агента пишутся в самом обработчике
+            if action == "audit_list":
+                action = "audit_view"
+            elif action == "audit_verify":
+                pass
+            body = {}
+            try:
+                body = json.loads(ctx._body or b"{}") if method == "POST" and (ctx._body or b"")[:1] == b"{" else {}
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                pass
+            actor = (ctx.user or {}).get("email") or str(body.get("email", ""))[:80] or "аноним"
+            if action in ("login", "pw_reset"):
+                actor = str(body.get("email", ""))[:80] or actor        # кто пытался войти, а не чья сессия открыта
+            if action == "login" and status != 200:
+                action = "login_locked" if status == 423 else "login_failed"
+            m = re.search(r"/api/(?:deals|notifications)/([\w-]+)", path)
+            result = ctx.audit_result or ("ok" if status < 400 else "denied" if status in (401, 403, 423) else f"error {status}")
+            details = ctx.audit_details or {k: body[k] for k in ("action", "format", "mode", "type", "amount", "term", "rate") if k in body}
+            try:
+                app.journal.audit(actor, action, m.group(1) if m else "", role=(ctx.user or {}).get("role", ""), ip=ctx.ip,
+                                  result=result, details=details)
+            except Exception as e:  # noqa — журнал не должен ронять ответ
+                print("audit error:", e)
 
         def do_GET(self):
             self._dispatch("GET")
@@ -968,8 +1146,13 @@ def make_handler(app: App):
     return Handler
 
 
+class Server(ThreadingHTTPServer):
+    request_queue_size = 256      # очередь входящих соединений: сотни агентов могут подключаться одновременно
+    daemon_threads = True
+
+
 def create_server(store: Store, host="127.0.0.1", port=8765):
     app = App(store)
-    srv = ThreadingHTTPServer((host, port), make_handler(app))
+    srv = Server((host, port), make_handler(app))
     srv.app = app
     return srv
