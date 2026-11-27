@@ -402,7 +402,7 @@ R("POST", "/ai/test", "ai_settings", async () => { throw err(DEMO_NOTE, 502); })
 R("POST", "/deals/([\\w-]+)/ai-analyze", "view", async (b, m) => {
   const d = getDeal(m[1], false), now = nowS(), inc = DB.inc[d.id];
   const rec = REC && (inc ? (REC.incidents[d.id] || {})[inc] : (REC.deals[d.id] || {}).report);
-  if (rec) { await sleep(1300 + Math.random() * 900); const rep = { ...rec, source: "ai", model: REC.model, ts: now, recorded: true }; DB.ai_reports[d.id] = rep; return rep; }
+  if (rec) { await sleep(1300 + Math.random() * 900); const rep = { ...rec, source: "ai", model: REC.model, ts: REC.recorded_at, recorded: true }; DB.ai_reports[d.id] = rep; return rep; }
   const rep = rulesReport(d, dealDetail(d, now), now); DB.ai_reports[d.id] = rep; return rep;
 });
 R("POST", "/deals/([\\w-]+)/ai-chat", "view", async (b, m) => { const d = getDeal(m[1], false), q = String(b.question || "").trim(); if (!q) throw err("Введите вопрос", 400); const now = nowS(), det = dealDetail(d, now), rep = rulesReport(d, det, now);
